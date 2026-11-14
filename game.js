@@ -1,4 +1,4 @@
-/* Catch the Booster — an unofficial SpaceX fan game. Not affiliated with or endorsed by SpaceX. */
+/* Chopsticks — an unofficial SpaceX fan game. Not affiliated with or endorsed by SpaceX. */
 (() => {
 'use strict';
 const P = window.Physics;
@@ -980,7 +980,7 @@ function finish(r) {
   const lessonHtml = lesson ? `<div class="rc-lesson"><b>LESSON LEARNED</b>${partTxt}${lesson.what}<br><span style="color:#fff">Next time:</span> ${lesson.better}<br><span style="color:#9aa0a8">Real-world fact:</span> ${lesson.fact}</div>`
     : `<div class="fact" style="margin-top:12px"><b>REAL-WORLD FACT</b>${r.kind === 'win' ? FACT_WIN : FACT_DIVERT}</div>`;
   $('#result-card').innerHTML = `
-    <div class="rc-head"><div><div class="rc-game">CATCH THE BOOSTER · MISSION REPORT</div><div class="rc-mission">${S.mission.full.toUpperCase()}</div><div class="rc-date">${S.mission.date} · ${S.mission.site.toUpperCase()} · DAY ${S.day}</div></div>
+    <div class="rc-head"><div><div class="rc-game">CHOPSTICKS · MISSION REPORT</div><div class="rc-mission">${S.mission.full.toUpperCase()}</div><div class="rc-date">${S.mission.date} · ${S.mission.site.toUpperCase()} · DAY ${S.day}</div></div>
       <div class="rc-status ${status[1]}">${status[0]}</div></div>
     <div class="rc-big"><div class="rc-score">${fmt(score)}<small>SCORE</small></div><div class="rc-headline">${headline}</div></div>
     <div class="rc-grid">
@@ -1010,10 +1010,10 @@ function scrollToFlaw() { setTimeout(() => { const el = document.querySelector('
 function shareText() {
   const r = S.result, m = S.mission.full;
   let t;
-  if (r.kind === 'win' && r.perfect) t = `PERFECT CATCH 🥢🚀 I caught the Super Heavy booster with the tower chopsticks: ${r.acc}% accuracy, ${fmt(r.score)} pts on ${m}.`;
-  else if (r.kind === 'win') t = `Booster caught! 🥢🚀 ${r.acc}% catch accuracy, ${fmt(r.score)} pts on ${m}.`;
-  else t = `RUD 💥 ${r.lesson ? r.lesson.head.charAt(0) + r.lesson.head.slice(1).toLowerCase() : 'Rapid unscheduled disassembly'}. Lesson learned. ${fmt(r.score)} pts on ${m}.`;
-  return `${t} Can you catch it? #CatchTheBooster (unofficial fan game)` + (GAME_URL ? ' ' + GAME_URL : '');
+  if (r.kind === 'win' && r.perfect) t = `PERFECT CATCH 🥢🚀 Caught the booster with ${r.acc}% accuracy in Chopsticks, an unofficial SpaceX fan game. ${fmt(r.score)} pts on ${m}.`;
+  else if (r.kind === 'win') t = `Caught the booster with ${r.acc}% accuracy in Chopsticks, an unofficial SpaceX fan game 🥢🚀 ${fmt(r.score)} pts on ${m}.`;
+  else t = `RUD 💥 ${r.lesson ? r.lesson.head.charAt(0) + r.lesson.head.slice(1).toLowerCase() : 'Rapid unscheduled disassembly'}. Lesson learned in Chopsticks, an unofficial SpaceX fan game. ${fmt(r.score)} pts on ${m}.`;
+  return `${t} Can you catch it? #Chopsticks` + (GAME_URL ? ' ' + GAME_URL : '');
 }
 function shareX() {
   const url = 'https://x.com/intent/post?text=' + encodeURIComponent(shareText());
@@ -1093,7 +1093,7 @@ function tick(rdt) {
   drawBanners(rdt);
   if (S.flash > 0) { ctx.fillStyle = `rgba(255,255,255,${clamp(S.flash, 0, 1) * 0.85})`; ctx.fillRect(0, 0, W, H); S.flash -= rdt * 1.6; }
   if (S.scene === 'landing' && S.land && S.land.caught) { ctx.strokeStyle = `rgba(255,255,255,${0.25 + 0.2 * Math.sin(S.t * 3)})`; ctx.lineWidth = 2; ctx.strokeRect(16, 16, W - 32, H - 32); }
-  if (DEMO && W >= 700 && S.screen === 'none' && !(S.land && S.land.caught)) text('UNOFFICIAL FAN GAME · CATCH THE BOOSTER', 18, 26, 10, { ls: 3, color: '#9aa0a8' });
+  if (DEMO && W >= 700 && S.screen === 'none' && !(S.land && S.land.caught)) text('CHOPSTICKS · UNOFFICIAL FAN GAME', 18, 26, 10, { ls: 3, color: '#9aa0a8' });
   if (S.screen === 'build') { if (S.kitFlash && S.kitFlash.t > 0) S.kitFlash.t -= rdt; drawKit(); }
   const flying = S.screen === 'none' && (S.scene === 'ascent' || S.scene === 'landing');
   document.body.dataset.flight = flying ? S.scene : '';

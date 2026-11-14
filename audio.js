@@ -1,4 +1,4 @@
-/* Catch the Booster — procedural Web Audio. No sound files; everything is synthesized. */
+/* Chopsticks — procedural Web Audio. No sound files; everything is synthesized. */
 (function () {
   'use strict';
   const LS = 'ctb-muted';

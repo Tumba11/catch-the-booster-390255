@@ -1,4 +1,4 @@
-/* Catch the Booster — simplified flight physics (fan game; numbers are approximate, for fun & learning). */
+/* Chopsticks — simplified flight physics (fan game; numbers are approximate, for fun & learning). */
 (function (root) {
   'use strict';
   const G0 = 9.80665, RE = 6371000;
