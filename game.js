@@ -461,7 +461,7 @@ function startLaunch() {
   const wx = S.wx; const mult = has('marcus') ? 0.7 : 1;
   const lightning = !DEMO && wx.lightning && rng() < 0.4 * mult ? 25 + rng() * 25 : null;
   const target = P.BOOSTBACK_COST + P.LANDING_IDEAL - v.s.reserveBonus;
-  const band = has('ava') ? 0.03 : 0.02;
+  const band = has('ava') ? 0.038 : 0.026;
   S.asc = { v, st, cfg, flaws, cmd: 1, outs: outs.sort((a, b) => a - b), lightning, target, band, staged: false, sepT: 0, failed: null, failT: 0, warp: 7, maxQcalled: false,
     gustPhase: rng() * 10, shownOut: 0, iceDamage: !DEMO && wx.temp < 40 && rng() < 0.25, countdown: 3, lastBeep: 4, drift: 0, driftV: 0, padT: 0, nextCreak: 0, flicker: 0 };
   S.ship = null; S.land = null; S.re = null;
@@ -515,7 +515,9 @@ function ascentUpdate(dt) {
     if (v.pf.id === 'auto' && st.t < 110) A.cmd = st.load > v.limit * 0.72 ? 0.62 : st.load < v.limit * 0.6 ? 1 : A.cmd;
     if (S.keys.down) A.cmd = clamp(A.cmd - 1.2 * dt, 0.6, 1); if (S.keys.up) A.cmd = clamp(A.cmd + 1.2 * dt, 0.6, 1);
   }
-  if (DEMO) A.warp = A.promptShown && P.reserveFrac(st) <= A.target + A.band + 0.006 ? 2.2 : 7; // demo/recording: linger on STAGE NOW
+  const resNow = P.reserveFrac(st);
+  if (DEMO) A.warp = A.promptShown && resNow <= A.target + A.band + 0.006 ? 2.2 : 7; // demo/recording: linger on STAGE NOW
+  else if (A.promptShown && !A.staged && !A.flaws.has('dry') && resNow <= A.target + A.band + 0.012) A.warp = 3; // give a phone tap time to land in the window
   const steps = Math.ceil(dt * A.warp / 0.05), h = dt * A.warp / steps;
   const shear = S.wx.shear;
   for (let i = 0; i < steps; i++) {
@@ -774,20 +776,20 @@ function boostbackDraw(dt) {
 function startLanding() {
   const A = S.asc || {};
   const reserve = A.reserve != null ? A.reserve : P.BOOSTBACK_COST + P.LANDING_IDEAL + 0.004;
-  const fuel = Math.max(0, (reserve - P.BOOSTBACK_COST) / P.LANDING_IDEAL * 14 * (has('omar') ? 1.15 : 1));
+  const fuel = Math.max(0, (reserve - P.BOOSTBACK_COST) / P.LANDING_IDEAL * 16 * (has('omar') ? 1.15 : 1));
   const side = rng() < 0.5 ? -1 : 1;
   const fins = P.FINS.find(f => f.id === S.cfg.fins);
   const k = (has('lena') ? 1.3 : 1) * (TOUCH ? 1.15 : 1);
-  const y0 = parseFloat(qs.get('alt')) || 1900; const vy0 = -Math.min(190, Math.sqrt(2 * 9.81 * y0) * 0.9 + 40);
+  const y0 = parseFloat(qs.get('alt')) || 1900; const vy0 = -Math.min(165, Math.sqrt(2 * 9.81 * y0) * 0.8 + 36);
   S.land = { x: side * (35 + rng() * 25) * Math.min(1, y0 / 1900), y: y0, vx: -side * (1 + rng() * 3), vy: vy0, thr: 0, fuel, fuel0: fuel, lit: false, everLit: false, lat: fins.lateral, steer: 0,
-    win: { x: 3.5 * k, vy: 5.5 * k, vx: 2.5 * k }, catchY: 36, windDir: rng() < 0.5 ? -1 : 1, windPh: rng() * 6, t: 0, done: false, caught: false, cam: { sc: 0.3, cy: 900 }, armClose: 0, prevY: y0, minAlt: 1e9, igniteCued: false };
+    win: { x: 5.0 * k, vy: 7.5 * k, vx: 3.5 * k }, catchY: 36, windDir: rng() < 0.5 ? -1 : 1, windPh: rng() * 6, t: 0, done: false, caught: false, cam: { sc: 0.3, cy: 900 }, armClose: 0, prevY: y0, minAlt: 1e9, igniteCued: false };
   S.scene = 'landing'; S.timeScale = 1;
   banner('BOOSTER RETURN', TOUCH ? 'Steer ◀ ▶ into the green laser · Burn at the BURN LINE' : 'Steer ← → into the green laser · Burn ↑ at the BURN LINE', 3.2);
   SND.play('fins', { dur: 1.2 });
   tipFlight('Line up early: keep the booster inside the green laser and the ◆ predicted touchdown between the arms. Light the burn at the BURN LINE; Super Heavy can\'t hover.');
 }
 function windAccel(L) { return S.wx.wind * 0.05 * L.windDir * (0.55 + 0.45 * Math.sin(L.t * 0.7 + L.windPh)); }
-const A_MAX = 27, MIN_THR = 0.35, G = 9.81;
+const A_MAX = 30, MIN_THR = 0.28, G = 9.81;
 function landingUpdate(dt) {
   const L = S.land; if (L.done) { if (L.caught) { L.armClose = Math.min(1, L.armClose + dt * 3); L.settle = (L.settle || 0) + dt; } return; }
   L.t += dt;
@@ -855,7 +857,7 @@ function waveOff() {
   later(2.6, () => finish({ kind: 'divert' }));
 }
 // ---- landing guidance helpers
-function burnAlt(L) { const v = Math.max(0, -L.vy); return L.catchY + v * v / (2 * (A_MAX - G)) * 1.25 + 60; }
+function burnAlt(L) { const v = Math.max(0, -L.vy); return L.catchY + v * v / (2 * (A_MAX - G)) * 1.22 + 55; }
 function landingPredict(L) {
   const hgt = Math.max(0, L.y - L.catchY), sp = Math.max(4, -L.vy), burnH = Math.max(0, burnAlt(L) - L.catchY);
   const slow = Math.max(3, (sp + 3.6) / 2);
