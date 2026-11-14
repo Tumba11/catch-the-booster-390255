@@ -15,7 +15,7 @@ const fmt = (n, d = 0) => Number(n).toLocaleString('en-US', { minimumFractionDig
 if (CAPTURE) document.body.classList.add('capture');
 const SND = window.GameAudio || { play() {}, engine() {}, setMuted() {}, muted: false, startLog() {} };
 const FEATURE_WAVEOFF = false;   // "catch called off, ditch in the Gulf" is parked for now (Tobias: hold off)
-const GAME_URL = '';             // fill in once a public link is approved; used by the share button
+const GAME_URL = 'https://catch-the-booster-390255.onrender.com';  // public link, used by the share button
 const LEADERBOARD_URL = null;    // hook for a future global leaderboard API (POST {name, score, ...}, GET top 20)
 const TOUCH = qs.get('touch') === '1' || (window.matchMedia && matchMedia('(pointer: coarse)').matches);
 if (TOUCH) document.body.classList.add('touch');
