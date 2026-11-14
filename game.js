@@ -22,7 +22,7 @@ if (TOUCH) document.body.classList.add('touch');
 
 // ---------------------------------------------------------------- DATA
 const MISSIONS = [
-  { id: 'f15', name: 'FLIGHT 15', full: 'Starship Flight 15', date: 'NOV 13, 2026', site: 'Starbase, Texas', badge: 'FEATURED · TODAY',
+  { id: 'f15', name: 'FLIGHT 15', full: 'Starship Flight 15', date: 'NOV 13, 2026', site: 'Starbase, Texas', badge: 'FEATURED · FLIGHT 15',
     desc: 'Real life, Nov 13, 2026: Starship reached orbit and deployed 26 Starlink V3 satellites, but the Super Heavy catch was called off and Booster 22 diverted to the Gulf. Your turn: make the catch.',
     fixedWx: { wind: 14, shear: 48, clouds: 'Scattered cumulus', lightning: false, temp: 71, sea: 4 }, payload: 26 },
   { id: 'free', name: 'FREE FLIGHT', full: 'Free Flight', date: 'ANY DAY', site: 'Starbase, Texas', badge: 'RANDOM WEATHER',
