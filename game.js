@@ -155,14 +155,16 @@ const has = id => Object.values(S.crew).includes(id);
 // ---------------------------------------------------------------- SCREENS
 function show(id) {
   S.screen = id;
+  document.body.classList.toggle('no-foot', id === 'result' || id === 'scores');
   document.querySelectorAll('.screen').forEach(el => el.classList.toggle('active', el.id === 's-' + id));
-  const overlayScreens = ['how', 'mission', 'build', 'crew', 'weather'];
+  const overlayScreens = ['how', 'mission', 'build', 'crew', 'weather', 'scores'];
   document.querySelectorAll('.screen').forEach(el => el.classList.toggle('overlay', overlayScreens.includes(el.id.slice(2))));
   if (id === 'mission') renderMissions();
   if (id === 'build') renderBuild();
   if (id === 'crew') renderCrew();
   if (id === 'weather') { if (!S.wx) newWeather(); renderWeather(); }
-  if (['title', 'how', 'mission', 'build', 'crew', 'weather'].includes(id)) { S.scene = 'pad'; }
+  if (id === 'scores') renderBoard('#scores-board', { heading: false });
+  if (['title', 'how', 'mission', 'build', 'crew', 'weather', 'scores'].includes(id)) { S.scene = 'pad'; }
   hideTip();
   if (TIPS[id]) menuTip(id, TIPS[id][Math.floor(rng() * TIPS[id].length)]);
 }
@@ -790,8 +792,16 @@ function startLanding() {
   tipFlight('Line up early: keep the booster inside the green laser and the ◆ predicted touchdown between the arms. Hold THROTTLE + at the BURN LINE until the speed readout turns green.');
 }
 function windAccel(L) { return S.wx.wind * 0.05 * L.windDir * (0.55 + 0.45 * Math.sin(L.t * 0.7 + L.windPh)); }
-const A_MAX = 30, MIN_THR = 0.28, G = 9.81;
+const A_MAX = 30, MIN_THR = 0.28, G = 9.81, MIN_SINK = 2.6;
 function landPunch(L) { const h = Math.max(0, L.y - L.catchY); return (L.vy < -L.win.vy && h < 160) ? 14 * clamp(1 - h / 160, 0, 1) : 0; }
+function minSink(L) {
+  const h = L.y - L.catchY;
+  if (h <= 1) return 0;
+  // High up, keep coming down fast enough that the chopsticks enter view. Near the arms, ease to a catchable sink.
+  if (h > 500) return Math.max(28, Math.min(90, h / 16));
+  if (h > 180) return 10;
+  return MIN_SINK;
+}
 function landingUpdate(dt) {
   const L = S.land; if (L.done) { if (L.caught) { L.armClose = Math.min(1, L.armClose + dt * 3); L.settle = (L.settle || 0) + dt; } return; }
   L.t += dt;
@@ -818,12 +828,26 @@ function landingUpdate(dt) {
   }
   L.steer = lerp(L.steer, (right ? 1 : 0) - (left ? 1 : 0), clamp(dt * 8, 0, 1));
   if (FEATURE_WAVEOFF && S.keys.x && !DEMO) return waveOff();
+  // Lighting the burn way above the cue would hover or waste all the propellant before the arms appear.
+  if (L.lit && L.y > burnAlt(L) + 80) L.thr = Math.min(L.thr, MIN_THR);
   if (L.lit) { L.fuel -= L.thr * dt; if (L.fuel <= 0) { L.fuel = 0; L.lit = false; L.thr = 0; L.flameOut = true; L.sputter = 1.1; SND.play('sputter'); banner('PROPELLANT DEPLETED', 'Engines sputtered out', 2, '#ff4d4d'); } }
   const thrA = L.lit ? L.thr * A_MAX + landPunch(L) : 0;
   const drag = 9.81 / (220 * 220);
-  const ay = thrA - G + drag * L.vy * L.vy * (L.vy < 0 ? 1 : -1);
+  let ay = thrA - G + drag * L.vy * L.vy * (L.vy < 0 ? 1 : -1);
   const ax = L.steer * L.lat + windAccel(L) - drag * 4 * L.vx * Math.abs(L.vx);
+  // Holding full throttle makes more thrust than weight. Cap it so the booster can never hover or climb once the burn is lit.
+  const sink = minSink(L);
+  if (L.lit && sink > 0) {
+    const ayCap = (-sink - L.vy) / Math.max(dt, 1 / 120);
+    if (ay > ayCap) ay = ayCap;
+  }
   L.vx += ax * dt; L.vy += ay * dt; L.prevY = L.y; L.x += L.vx * dt; L.y += L.vy * dt;
+  if (L.lit && sink > 0 && L.vy > -sink) L.vy = -sink;
+  // If we're stalled above the arms, force a descent so the chopsticks come back into view.
+  if (L.y > L.catchY + 2) {
+    L.stallT = (L.prevY - L.y > 0.8 * dt) ? 0 : (L.stallT || 0) + dt;
+    if (L.stallT > 3) { L.vy = Math.min(L.vy, -MIN_SINK); if (L.lit) L.thr = Math.min(L.thr, MIN_THR); }
+  } else L.stallT = 0;
   const stopD = L.vy < 0 ? (L.vy * L.vy) / (2 * (A_MAX + landPunch(L) - G)) : 0;
   L.stopD = stopD;
   if (!L.everLit && !L.igniteCued && L.y <= burnAlt(L)) { L.igniteCued = true; banner('LANDING BURN · NOW', TOUCH ? 'Hold THROTTLE +' : 'Hold ↑ / W', 2, '#3ddc84'); }
@@ -952,10 +976,14 @@ function drawCatchWorld(L, toS, sc, o = {}) {
 }
 function landingDraw() {
   const L = S.land, compact = compactHUD(), hgt = L.y - L.catchY, pip = pipOn(L);
-  // camera: follow the booster when high; in the last ~400 m frame both the booster and the arms
+  // camera: follow the booster when high; on approach (and if it's sinking slowly) keep the arms in frame
   const top = Math.max(L.y + 80, 180);
   let targetSc = clamp(H * 0.8 / (top + 20), 0.9, 4.2);
-  if (hgt < 420) targetSc = Math.min(targetSc, Math.max(0.9, H * (compact ? 0.5 : 0.56) / Math.max(60, L.y - 29)));
+  if (hgt < 720) targetSc = Math.min(targetSc, Math.max(0.4, H * (compact ? 0.5 : 0.56) / Math.max(60, L.y - 29)));
+  else if (L.lit && L.vy > -30) {
+    const room = Math.max(200, H - (compact ? 300 : 120));
+    targetSc = clamp(room / Math.max(200, L.y + 50), 0.2, 0.9);
+  }
   L.cam.sc = lerp(L.cam.sc, targetSc, 0.08);
   const sc = L.cam.sc;
   const lowA = LS() ? 0.3 : W < 700 ? 0.28 : 0.2;
@@ -1251,10 +1279,9 @@ function finish(r) {
   if (lesson && lesson.build) btn(`RETRY: FIX THE ${PART_LABEL[lesson.parts[0]]} →`, 'primary', () => { S.highlight = lesson.parts.slice(); show('build'); scrollToFlaw(); });
   btn('FLY AGAIN', lesson && lesson.build ? '' : 'primary', () => { S.wx = null; S.scrubs = 0; S.day = 1; show('weather'); });
   btn('SHARE ON X', 'share', () => shareX());
-  btn('LEADERBOARD', '', () => toggleBoard());
   btn('TITLE', '', () => show('title'));
   saveScore(S.result);
-  $('#board').classList.add('hidden-board');
+  renderBoard('#board');
   show('result');
 }
 function scrollToFlaw() { setTimeout(() => { const el = document.querySelector('.opt-group.flaw'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' }); }, 30); }
@@ -1271,19 +1298,42 @@ function shareX() {
   S.shareUrl = url;
   if (!CAPTURE) window.open(url, '_blank', 'noopener');
 }
-// local leaderboard (global one plugs in via LEADERBOARD_URL once the game is online)
-function loadBoard() { try { return JSON.parse(localStorage.getItem('ctb-board') || '[]'); } catch (e) { return []; } }
+// Scores live in localStorage on this device. A global board can plug in later via LEADERBOARD_URL.
+const BOARD_KEY = 'ctb-board', BOARD_MAX = 20;
+function localDay() {
+  const n = new Date();
+  return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + '-' + String(n.getDate()).padStart(2, '0');
+}
+function boardDate(iso) {
+  const p = String(iso || '').split('-').map(Number);
+  if (p.length < 3 || !p[0]) return iso || '';
+  return new Date(p[0], p[1] - 1, p[2]).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function loadBoard() { try { return JSON.parse(localStorage.getItem(BOARD_KEY) || '[]'); } catch (e) { return []; } }
 function saveScore(r) {
-  const entry = { score: r.score, acc: r.acc, outcome: r.kind === 'win' ? (r.perfect ? 'PERFECT' : 'CAUGHT') : r.kind === 'divert' ? 'DIVERT' : 'RUD', mission: S.mission.name, date: new Date().toISOString().slice(0, 10), id: Date.now() + '-' + Math.floor(rng() * 1e6) };
-  const b = loadBoard(); b.push(entry); b.sort((a, c) => c.score - a.score);
-  try { localStorage.setItem('ctb-board', JSON.stringify(b.slice(0, 10))); } catch (e) {}
+  const entry = { score: r.score, acc: r.acc, outcome: r.kind === 'win' ? (r.perfect ? 'PERFECT' : 'CAUGHT') : r.kind === 'divert' ? 'DIVERT' : 'RUD', mission: S.mission.name, date: localDay(), id: Date.now() + '-' + Math.floor(rng() * 1e6) };
+  const b = loadBoard(); b.push(entry);
+  b.sort((a, c) => (c.score - a.score) || String(c.id).localeCompare(String(a.id)));
+  let kept = b.slice(0, BOARD_MAX);
+  if (!kept.some(e => e.id === entry.id)) kept = kept.slice(0, BOARD_MAX - 1).concat([entry]);
+  try { localStorage.setItem(BOARD_KEY, JSON.stringify(kept)); S.boardError = false; }
+  catch (e) { S.boardError = true; }
   S.lastEntry = entry.id;
   if (LEADERBOARD_URL) fetch(LEADERBOARD_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(entry) }).catch(() => {});
 }
-function toggleBoard() {
-  const el = $('#board'); const b = loadBoard();
-  el.innerHTML = `<h3 style="margin-top:0">LOCAL LEADERBOARD · THIS DEVICE</h3><ol>${b.map(e => `<li class="${e.id === S.lastEntry ? 'me' : ''}"><span>${fmt(e.score)}</span><span>${e.outcome}${e.acc != null ? ' · ' + e.acc + '%' : ''}</span><span>${e.mission} · ${e.date}</span></li>`).join('')}</ol><div class="muted">A global leaderboard goes live when the game is online.</div>`;
-  el.classList.toggle('hidden-board');
+function boardHTML(opts) {
+  const b = loadBoard();
+  let body;
+  if (S.boardError) body = '<p class="muted">Scores couldn\'t be saved on this device. They may be blocked in private browsing.</p>';
+  else if (!b.length) body = '<p class="muted">No flights on this device yet. Finish a launch and your score will show up here.</p>';
+  else body = '<ol>' + b.map(e => `<li class="${e.id === S.lastEntry ? 'me' : ''}"><span class="sc">${fmt(e.score)}</span><span class="out">${e.outcome}${e.acc != null ? ' · ' + e.acc + '%' : ''}</span><span class="meta">${e.mission} · ${boardDate(e.date)}</span></li>`).join('') + '</ol>';
+  const head = (opts && opts.heading === false) ? '' : '<h3>SCORES ON THIS DEVICE</h3>';
+  return head + body + '<div class="muted board-note">These scores stay on this phone or browser. A worldwide leaderboard isn\'t up yet.</div>';
+}
+function renderBoard(sel, opts) {
+  const el = $(sel || '#board'); if (!el) return;
+  el.innerHTML = boardHTML(opts);
+  el.classList.remove('hidden-board');
 }
 
 // ---------------------------------------------------------------- INPUT
@@ -1355,7 +1405,7 @@ let last = performance.now();
 function frame(now) { const dt = (now - last) / 1000; last = now; try { tick(dt); } catch (err) { console.error(err); } requestAnimationFrame(frame); }
 
 // test / capture hooks
-window.__game = { S, show, startLaunch, startLanding, startReentry, stage, finish, tick, P, buildFlaws, shareText, MISSIONS, newWeather, stageState, burnAlt, landingPredict, speedState, landPunch };
+window.__game = { S, show, startLaunch, startLanding, startReentry, stage, finish, tick, P, buildFlaws, shareText, MISSIONS, newWeather, stageState, burnAlt, landingPredict, speedState, landPunch, minSink, loadBoard, saveScore, renderBoard };
 window.__advance = (ms, step = 1000 / 60) => { for (let t = 0; t < ms; t += step) tick(step / 1000); };
 if (CAPTURE) SND.startLog(() => S.t);
 
