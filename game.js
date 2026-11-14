@@ -515,6 +515,7 @@ function ascentUpdate(dt) {
     if (v.pf.id === 'auto' && st.t < 110) A.cmd = st.load > v.limit * 0.72 ? 0.62 : st.load < v.limit * 0.6 ? 1 : A.cmd;
     if (S.keys.down) A.cmd = clamp(A.cmd - 1.2 * dt, 0.6, 1); if (S.keys.up) A.cmd = clamp(A.cmd + 1.2 * dt, 0.6, 1);
   }
+  if (DEMO) A.warp = A.promptShown && P.reserveFrac(st) <= A.target + A.band + 0.006 ? 2.2 : 7; // demo/recording: linger on STAGE NOW
   const steps = Math.ceil(dt * A.warp / 0.05), h = dt * A.warp / steps;
   const shear = S.wx.shear;
   for (let i = 0; i < steps; i++) {
@@ -677,7 +678,7 @@ function ascentCoach(A, st, v, res) {
   if (ss === 'soon') return { t: 'STAGE WINDOW AHEAD · WATCH BOOSTER FUEL', c: '#ffffff' };
   if (A.promptShown) return null;
   const minus = TOUCH ? 'THROTTLE −' : 'THROTTLE ↓ / S', plus = TOUCH ? 'THROTTLE +' : 'THROTTLE ↑ / W';
-  const hi = st.load > v.limit * 0.87, preQ = !A.maxQcalled && st.t > 6 && st.t < 95;
+  const hi = st.load > v.limit * 0.87, preQ = !A.maxQcalled && st.t < 95;
   if (v.pf.id === 'aggressive' && st.t < 100) return hi ? { t: 'HIGH LOAD · THROTTLE LOCKED BY BUILD', c: '#ffc53d', pulse: true } : preQ ? { t: 'MAX-Q AHEAD · AGGRESSIVE PROFILE', c: '#9aa0a8' } : null;
   if (hi) return { t: `HIGH LOAD: HOLD ${minus}`, c: '#ffc53d', pulse: true };
   if (preQ && st.load > v.limit * 0.45) return v.pf.id === 'auto' ? { t: 'MAX-Q AHEAD: AUTO-THROTTLE EASING', c: '#9fd3ff' } : { t: `MAX-Q AHEAD: EASE ${minus}`, c: '#ffc53d' };
@@ -733,7 +734,7 @@ function ascentHUD() {
   drawEngines(W - Math.max(24, W * 0.05) - 36, by + 22, 34, v, st.enginesOut);
   }
   coachDraw(ascentCoach(A, st, v, res), LS() ? H - 104 : narrow ? Math.min(H * 0.6, H - 150) : H * 0.17, narrow);
-  if (!TOUCH && !narrow && A.countdown <= 0 && !A.staged && !A.failed) text('↑/W THROTTLE +  ·  ↓/S THROTTLE −  ·  SPACE STAGE', W / 2, 24, 10, { align: 'center', ls: 2.5, color: '#8a8f98' });
+  if (!TOUCH && !DEMO && !narrow && A.countdown <= 0 && !A.staged && !A.failed) text('↑/W THROTTLE +  ·  ↓/S THROTTLE −  ·  SPACE STAGE', W / 2, 24, 10, { align: 'center', ls: 2.5, color: '#8a8f98' });
 }
 
 // ---------------------------------------------------------------- BOOSTBACK + LANDING
@@ -1061,7 +1062,7 @@ function landingHUD(pred) {
   gauge(rx, ty + 36, gw2, 'LANDING PROPELLANT', L.fuel, Math.max(L.fuel0, 1), { right: `${fmt(L.fuel, 1)} s`, color: L.fuel < 3 ? '#ff4d4d' : '#fff' });
   const bw = Math.min(420, W - 2 * (lx + 290));
   offsetBar(L, pred, W / 2 - bw / 2, ty + 14, bw);
-  if (!L.done && !TOUCH) text('↑/W THROTTLE + (LIGHT BURN) · ↓/S THROTTLE − · ←→/AD STEER', W / 2, 24, 10.5, { align: 'center', ls: 2.5, color: '#8a8f98' });
+  if (!L.done && !TOUCH && !DEMO) text('↑/W THROTTLE + (LIGHT BURN) · ↓/S THROTTLE − · ←→/AD STEER', W / 2, 24, 10.5, { align: 'center', ls: 2.5, color: '#8a8f98' });
 }
 
 // ---------------------------------------------------------------- PARTICLES, BANNERS, FX
