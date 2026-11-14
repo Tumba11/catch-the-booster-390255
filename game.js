@@ -472,7 +472,7 @@ function startLaunch() {
 const TUT = [
   ['THROTTLE', () => TOUCH ? '<b>THROTTLE +</b> and <b>THROTTLE −</b> set engine power; the bar between them shows the %. Ease off before <b>MAX-Q</b> so the air doesn\'t crush the rocket, then go back to full. The coach line tells you when.' : '<kbd>↑</kbd>/<kbd>W</kbd> is <b>THROTTLE +</b>, <kbd>↓</kbd>/<kbd>S</kbd> is <b>THROTTLE −</b>. Ease off before <b>MAX-Q</b> so the air doesn\'t crush the rocket, then go back to full. The coach line tells you when.'],
   ['STAGING', () => `Watch <b>BOOSTER FUEL</b>. When it reaches the green <b>STAGE WINDOW</b>, ${TOUCH ? 'tap <b>STAGE</b> (it pulses green)' : 'press <kbd>SPACE</kbd>'}. Too early and the Ship is short on speed. Too late and the booster can't fly home.`],
-  ['THE CATCH', () => `Steer ${TOUCH ? '<b>◀ ▶</b>' : '<kbd>←</kbd><kbd>→</kbd>'} to keep the booster in the green laser above the arms and the <b>◆ predicted touchdown</b> between them. At the <b>BURN LINE</b>, ${TOUCH ? 'tap <b>THROTTLE +</b>' : 'press <kbd>↑</kbd>'} to light the burn, then feather it until vertical speed turns green. The <b>ARMS CAM</b> zooms in for the last 300 m.`]
+  ['THE CATCH', () => `Steer ${TOUCH ? '<b>◀ ▶</b>' : '<kbd>←</kbd><kbd>→</kbd>'} to keep the booster in the green laser above the arms and the <b>◆ predicted touchdown</b> between them. At the <b>BURN LINE</b>, ${TOUCH ? 'hold <b>THROTTLE +</b>' : 'hold <kbd>↑</kbd>'} to light the burn and keep slowing down until the speed readout turns green. The <b>ARMS CAM</b> zooms in for the last 300 m.`]
 ];
 let tutStep = 0;
 function tutorialSeen() { try { return localStorage.getItem('chop-tut') === '1'; } catch (e) { return true; } }
@@ -491,8 +491,9 @@ function touchSync() {
   const sb = $('#stage-btn'); sb.classList.toggle('ready', ss === 'window'); sb.classList.toggle('late', ss === 'late');
   const L = S.land, lb = $('#burn-lbl'), bb = $('#burn-btn');
   const needBurn = S.scene === 'landing' && L && !L.lit && !L.done && L.fuel > 0;
-  lb.textContent = needBurn ? 'LIGHT BURN' : 'THROTTLE';
-  bb.classList.toggle('ready', !!(needBurn && L.igniteCued));
+  const tooFast = S.scene === 'landing' && L && L.lit && !L.done && Math.abs(L.vy) > L.win.vy;
+  lb.textContent = needBurn ? 'LIGHT BURN' : tooFast ? 'HOLD BURN' : 'THROTTLE';
+  bb.classList.toggle('ready', !!(needBurn && L.igniteCued) || !!tooFast);
 }
 function ascentUpdate(dt) {
   const A = S.asc, st = A.st, v = A.v;
@@ -782,33 +783,50 @@ function startLanding() {
   const k = (has('lena') ? 1.3 : 1) * (TOUCH ? 1.15 : 1);
   const y0 = parseFloat(qs.get('alt')) || 1900; const vy0 = -Math.min(165, Math.sqrt(2 * 9.81 * y0) * 0.8 + 36);
   S.land = { x: side * (35 + rng() * 25) * Math.min(1, y0 / 1900), y: y0, vx: -side * (1 + rng() * 3), vy: vy0, thr: 0, fuel, fuel0: fuel, lit: false, everLit: false, lat: fins.lateral, steer: 0,
-    win: { x: 5.0 * k, vy: 7.5 * k, vx: 3.5 * k }, catchY: 36, windDir: rng() < 0.5 ? -1 : 1, windPh: rng() * 6, t: 0, done: false, caught: false, cam: { sc: 0.3, cy: 900 }, armClose: 0, prevY: y0, minAlt: 1e9, igniteCued: false };
+    win: { x: 5.0 * k, vy: 10.0 * k, vx: 3.5 * k }, catchY: 36, windDir: rng() < 0.5 ? -1 : 1, windPh: rng() * 6, t: 0, done: false, caught: false, cam: { sc: 0.3, cy: 900 }, armClose: 0, prevY: y0, minAlt: 1e9, igniteCued: false };
   S.scene = 'landing'; S.timeScale = 1;
-  banner('BOOSTER RETURN', TOUCH ? 'Steer ◀ ▶ into the green laser · Burn at the BURN LINE' : 'Steer ← → into the green laser · Burn ↑ at the BURN LINE', 3.2);
+  banner('BOOSTER RETURN', TOUCH ? 'Steer ◀ ▶ into the green laser · Hold THROTTLE + at the BURN LINE' : 'Steer ← → into the green laser · Hold ↑ at the BURN LINE', 3.2);
   SND.play('fins', { dur: 1.2 });
-  tipFlight('Line up early: keep the booster inside the green laser and the ◆ predicted touchdown between the arms. Light the burn at the BURN LINE; Super Heavy can\'t hover.');
+  tipFlight('Line up early: keep the booster inside the green laser and the ◆ predicted touchdown between the arms. Hold THROTTLE + at the BURN LINE until the speed readout turns green.');
 }
 function windAccel(L) { return S.wx.wind * 0.05 * L.windDir * (0.55 + 0.45 * Math.sin(L.t * 0.7 + L.windPh)); }
 const A_MAX = 30, MIN_THR = 0.28, G = 9.81;
+function landPunch(L) { const h = Math.max(0, L.y - L.catchY); return (L.vy < -L.win.vy && h < 160) ? 14 * clamp(1 - h / 160, 0, 1) : 0; }
 function landingUpdate(dt) {
   const L = S.land; if (L.done) { if (L.caught) { L.armClose = Math.min(1, L.armClose + dt * 3); L.settle = (L.settle || 0) + dt; } return; }
   L.t += dt;
   // controls
   let up = S.keys.up, down = S.keys.down, left = S.keys.left, right = S.keys.right;
   if (DEMO || S.auto) { const ap = autopilot(L); up = ap.up; down = ap.down; left = ap.left; right = ap.right; if (ap.thr != null && L.lit) L.thr = ap.thr; }
-  if (up && L.fuel > 0) { if (!L.lit) { L.lit = true; L.everLit = true; L.thr = Math.max(L.thr, 0.6); banner('LANDING BURN', 'Engines relit', 1.8); SND.play('bang', { k: 0.35 }); } else if (!DEMO && !S.auto) L.thr = clamp(L.thr + 1.4 * dt, MIN_THR, 1); }
+  if (up && L.fuel > 0) { if (!L.lit) { L.lit = true; L.everLit = true; L.thr = Math.max(L.thr, 0.9); banner('LANDING BURN', TOUCH ? 'Hold THROTTLE + if you are still too fast' : 'Hold ↑ if you are still too fast', 1.8); SND.play('bang', { k: 0.35 }); } else if (!DEMO && !S.auto) L.thr = clamp(L.thr + 1.4 * dt, MIN_THR, 1); }
   if (down && L.lit && !DEMO && !S.auto) L.thr = clamp(L.thr - 1.4 * dt, MIN_THR, 1);
+  // A tap often starts the burn then lets go. Once lit, ease toward a catchable slam unless the player is backing off.
+  // Cut throttle once speed is already catchable so a held or tapped + doesn't bounce the booster back up.
+  if (L.lit && !DEMO && !S.auto && L.fuel > 0 && !down) {
+    const h = Math.max(0.6, L.y - L.catchY);
+    const vT = -Math.min(L.win.vy * 0.65, 6);
+    let target;
+    if (L.vy >= vT) target = MIN_THR;
+    else {
+      const aNeed = (L.vy * L.vy - vT * vT) / (2 * h) + G;
+      target = clamp(aNeed / A_MAX + 0.04, MIN_THR, 1);
+    }
+    const catchable = L.vy > -L.win.vy && L.vy < 2;
+    if (catchable) L.thr = lerp(L.thr, MIN_THR, clamp(dt * 8, 0, 1));
+    else if (up && L.vy < vT) L.thr = Math.max(L.thr, target);
+    else L.thr = lerp(L.thr, target, clamp(dt * 5, 0, 1));
+  }
   L.steer = lerp(L.steer, (right ? 1 : 0) - (left ? 1 : 0), clamp(dt * 8, 0, 1));
   if (FEATURE_WAVEOFF && S.keys.x && !DEMO) return waveOff();
   if (L.lit) { L.fuel -= L.thr * dt; if (L.fuel <= 0) { L.fuel = 0; L.lit = false; L.thr = 0; L.flameOut = true; L.sputter = 1.1; SND.play('sputter'); banner('PROPELLANT DEPLETED', 'Engines sputtered out', 2, '#ff4d4d'); } }
-  const thrA = L.lit ? L.thr * A_MAX : 0;
+  const thrA = L.lit ? L.thr * A_MAX + landPunch(L) : 0;
   const drag = 9.81 / (220 * 220);
   const ay = thrA - G + drag * L.vy * L.vy * (L.vy < 0 ? 1 : -1);
   const ax = L.steer * L.lat + windAccel(L) - drag * 4 * L.vx * Math.abs(L.vx);
   L.vx += ax * dt; L.vy += ay * dt; L.prevY = L.y; L.x += L.vx * dt; L.y += L.vy * dt;
-  const stopD = L.vy < 0 ? (L.vy * L.vy) / (2 * (A_MAX - G)) : 0;
+  const stopD = L.vy < 0 ? (L.vy * L.vy) / (2 * (A_MAX + landPunch(L) - G)) : 0;
   L.stopD = stopD;
-  if (!L.everLit && !L.igniteCued && L.y <= burnAlt(L)) { L.igniteCued = true; banner('LANDING BURN · NOW', TOUCH ? 'Tap THROTTLE +' : 'Press ↑ / W', 2, '#3ddc84'); }
+  if (!L.everLit && !L.igniteCued && L.y <= burnAlt(L)) { L.igniteCued = true; banner('LANDING BURN · NOW', TOUCH ? 'Hold THROTTLE +' : 'Hold ↑ / W', 2, '#3ddc84'); }
   // catch check
   if (L.prevY > L.catchY && L.y <= L.catchY) {
     const dx = Math.abs(L.x), dvy = Math.abs(L.vy), dvx = Math.abs(L.vx);
@@ -969,22 +987,60 @@ function landingDraw() {
     const mx = clamp(toS(0, 0)[0], 60, W - 60);
     text(`▼ TOWER ${fmt(L.y - L.catchY)} m`, mx, H - (TOUCH ? 140 : 64), 12, { align: 'center', ls: 3, color: '#9fd3ff' });
   }
-  // speed tag next to the booster while the arms cam is off
-  if (!L.done && !pip) {
-    const [bx, by] = toS(L.x, L.y + 36);
-    const lines = landingTags(L);
-    const right = bx + 4.5 * sc + 12, left = bx - 4.5 * sc - 12, useRight = right + 120 < W || left - 120 < 0;
-    lines.forEach((ln, i) => text(ln[0], useRight ? right : left, clamp(by, 200, H - 170) + i * 17, i ? 11 : 14, { mono: true, align: useRight ? 'left' : 'right', color: ln[1], weight: 600, alpha: ln[2] ? 0.6 + 0.4 * Math.sin(S.t * 10) : 1 }));
+  // big vertical-speed readout next to the arms on final approach
+  if (!L.done && hgt < 650) {
+    const [ax, ay] = toS(0, 100);
+    const pipBlock = pip ? pipRect() : null;
+    let bugX = ax + Math.max(36, L.win.x * sc + 18), bugY = ay - 8;
+    if (pipBlock && bugX + 180 > pipBlock.x) bugX = Math.min(ax - 18, pipBlock.x - 12) - 200;
+    drawSpeedBug(bugX, bugY, L);
   }
-  if (!L.caught) { if (pip) drawPip(L, pred, R); landingHUD(pred); }
+  if (!L.caught) { if (pip) drawPip(L, pred, R); landingHUD(pred); coachDraw(landingCoach(L), compact ? (LS() ? H - 100 : Math.min(H * 0.56, H - 200)) : H * 0.2, compact); }
   else if (W >= 700) text('UNOFFICIAL FAN GAME · NOT AFFILIATED WITH OR ENDORSED BY SPACEX', W / 2, 40, 11, { align: 'center', ls: 3, color: '#c9cdd4' });
   else { text('UNOFFICIAL FAN GAME', W / 2, 36, 10, { align: 'center', ls: 3, color: '#c9cdd4' }); text('NOT AFFILIATED WITH OR ENDORSED BY SPACEX', W / 2, 52, 9, { align: 'center', ls: 1.5, color: '#c9cdd4' }); }
 }
+function speedState(L) {
+  const spd = Math.abs(L.vy), limit = L.win.vy, over = spd - limit;
+  if (L.vy > 1.5) return { spd, limit, tone: 'up', color: '#ffc53d', coach: 'EASE THROTTLE' };
+  if (spd <= limit) return { spd, limit, tone: 'ok', color: '#3ddc84', coach: 'SLOW ENOUGH' };
+  const close = over <= Math.max(3.5, limit * 0.3);
+  const hold = L.lit ? 'TOO FAST: HOLD BURN' : 'TOO FAST: LIGHT BURN';
+  return { spd, limit, tone: close ? 'close' : 'hot', color: close ? '#ffc53d' : '#ff4d4d', coach: hold };
+}
+function landingCoach(L) {
+  if (!L || L.done) return null;
+  const h = L.y - L.catchY, st = speedState(L);
+  if (!L.everLit) {
+    if (L.igniteCued || L.y <= burnAlt(L)) return { t: TOUCH ? 'HOLD THROTTLE + TO LIGHT THE BURN' : 'HOLD ↑ TO LIGHT THE BURN', c: '#3ddc84', pulse: true };
+    return h < 700 ? { t: 'BURN LINE AHEAD', c: '#9fd3ff' } : null;
+  }
+  if (h > 500 && st.tone === 'ok') return null;
+  return { t: st.coach, c: st.color, pulse: st.tone !== 'ok' };
+}
+function drawSpeedBug(x, y, L) {
+  const st = speedState(L);
+  const num = `↓ ${fmt(st.spd, 1)}  /  ${fmt(st.limit, 1)} m/s`;
+  const fs = W < 700 ? 20 : 24, cs = W < 700 ? 11.5 : 13;
+  ctx.save();
+  ctx.font = `600 ${fs}px Menlo, Consolas, monospace`;
+  const nw = ctx.measureText(num).width;
+  ctx.font = `600 ${cs}px Helvetica Neue, Helvetica, Arial, sans-serif`;
+  if ('letterSpacing' in ctx) ctx.letterSpacing = '1.2px';
+  const cw = ctx.measureText(st.coach).width;
+  const bw = Math.max(nw, cw) + 26, bh = W < 700 ? 54 : 58;
+  const bx = clamp(x, 8, W - bw - 8), by = clamp(y - bh, 8, H - bh - (TOUCH ? 150 : 24));
+  rr(bx, by, bw, bh, 10); ctx.fillStyle = 'rgba(0,0,0,.78)'; ctx.fill();
+  ctx.strokeStyle = st.color; ctx.lineWidth = 2.2; ctx.stroke();
+  ctx.restore();
+  text(num, bx + bw / 2, by + (W < 700 ? 24 : 26), fs, { align: 'center', mono: true, color: st.color, weight: 600 });
+  text(st.coach, bx + bw / 2, by + bh - 11, cs, { align: 'center', ls: 1.2, color: st.color, weight: 600, alpha: st.tone === 'ok' ? 1 : 0.7 + 0.3 * Math.sin(S.t * 9) });
+}
+
 function landingTags(L) {
-  const vOk = Math.abs(L.vy) <= L.win.vy, out = [[`${L.vy < 0 ? '↓' : '↑'} ${fmt(Math.abs(L.vy), 1)} m/s`, vOk ? '#3ddc84' : '#ffffff']];
-  if (!L.everLit && L.vy < 0) { const ba = burnAlt(L); out.push(L.y <= ba ? ['BURN NOW ▲', '#3ddc84', true] : [`BURN IN ${fmt(L.y - ba)} m`, '#9fd3ff']); }
-  else if (L.lit && L.vy < -L.win.vy && L.y - L.catchY < 120) out.push(['MORE THROTTLE', '#ffc53d', true]);
-  else if (L.lit && L.vy > -1.5) out.push(['EASE THROTTLE', '#ffc53d', true]);
+  const st = speedState(L);
+  const out = [[`↓ ${fmt(st.spd, 1)} / ${fmt(st.limit, 1)} m/s`, st.color]];
+  if (!L.everLit && L.vy < 0) { const ba = burnAlt(L); out.push(L.y <= ba ? ['HOLD BURN NOW ▲', '#3ddc84', true] : [`BURN IN ${fmt(L.y - ba)} m`, '#9fd3ff']); }
+  else out.push([st.coach, st.color, st.tone !== 'ok']);
   return out;
 }
 function drawPip(L, pred, R) {
@@ -998,14 +1054,13 @@ function drawPip(L, pred, R) {
   // booster off-frame indicators
   const bxp = pcx + L.x * psc, aligned = Math.abs(L.x) <= L.win.x;
   if (bxp < R.x + 6 || bxp > R.x + R.w - 6) text(`${L.x < 0 ? '◀' : ''} BOOSTER ${fmt(Math.abs(L.x), 0)} m ${L.x > 0 ? '▶' : ''}`, L.x < 0 ? R.x + 8 : R.x + R.w - 8, R.y + 42, 10, { align: L.x < 0 ? 'left' : 'right', color: '#ffc53d', weight: 600 });
-  // readouts inside the cam
-  const tags = landingTags(L);
+  // big vertical-speed readout at the bottom of the arms cam
+  const st = speedState(L);
   const fs = R.w < 180 ? 15 : 17;
-  ctx.fillStyle = 'rgba(0,0,0,.62)'; ctx.fillRect(R.x, R.y + R.h - 54, R.w, 54);
-  text(tags[0][0], R.x + 9, R.y + R.h - 36, fs, { mono: true, color: tags[0][1], weight: 600 });
-  text(`OFFSET ${L.x >= 0 ? '+' : ''}${fmt(L.x, 1)} m`, R.x + 9, R.y + R.h - 21, 10.5, { mono: true, color: aligned ? '#3ddc84' : '#ffc53d', weight: 600 });
-  if (tags[1]) text(tags[1][0], R.x + 9, R.y + R.h - 7, 10.5, { mono: true, color: tags[1][1], weight: 600, alpha: tags[1][2] ? 0.6 + 0.4 * Math.sin(S.t * 10) : 1 });
-  else text(`CATCH ≤ ${fmt(L.win.vy, 1)} m/s`, R.x + 9, R.y + R.h - 7, 9.5, { mono: true, color: '#9aa0a8' });
+  ctx.fillStyle = 'rgba(0,0,0,.72)'; ctx.fillRect(R.x, R.y + R.h - 62, R.w, 62);
+  text(`↓ ${fmt(st.spd, 1)} / ${fmt(st.limit, 1)} m/s`, R.x + 9, R.y + R.h - 40, fs, { mono: true, color: st.color, weight: 600 });
+  text(st.coach, R.x + 9, R.y + R.h - 24, 10.5, { color: st.color, weight: 600, ls: 1, alpha: st.tone === 'ok' ? 1 : 0.7 + 0.3 * Math.sin(S.t * 9) });
+  text(`OFFSET ${L.x >= 0 ? '+' : ''}${fmt(L.x, 1)} m`, R.x + 9, R.y + R.h - 8, 10, { mono: true, color: aligned ? '#3ddc84' : '#ffc53d', weight: 600 });
   ctx.restore();
   ctx.strokeStyle = aligned ? 'rgba(61,220,132,.9)' : 'rgba(255,255,255,.5)'; ctx.lineWidth = 1.5; rr(R.x, R.y, R.w, R.h, 10); ctx.stroke();
   ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(R.x + 8, R.y + 8, 78, 16);
@@ -1030,15 +1085,15 @@ function offsetBar(L, pred, x, y, w) {
   text('▼ BOOSTER  ◆ PREDICTED', x + w, y + 22, 9.5, { align: 'right', ls: 1, color: '#9aa0a8' });
 }
 function landingHUD(pred) {
-  const L = S.land, alt = L.y - L.catchY;
-  const vOk = Math.abs(L.vy) <= L.win.vy, xOk = Math.abs(L.x) <= L.win.x, hOk = Math.abs(L.vx) <= L.win.vx;
+  const L = S.land, alt = L.y - L.catchY, st = speedState(L);
+  const xOk = Math.abs(L.x) <= L.win.x, hOk = Math.abs(L.vx) <= L.win.vx;
   const okc = ok => ok == null ? '#fff' : ok ? '#3ddc84' : '#ffc53d';
   if (compactHUD()) {
     const landscape = LS();
     const hb = landscape ? 84 : 160;
     const grd = ctx.createLinearGradient(0, 0, 0, hb + 20); grd.addColorStop(0, 'rgba(0,0,0,.85)'); grd.addColorStop(0.8, 'rgba(0,0,0,.6)'); grd.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = grd; ctx.fillRect(0, 0, W, hb + 20);
-    const cell = (k, v, x, y, ok) => { text(k, x, y - 14, 8.5, { ls: 1.8, color: '#9aa0a8' }); text(v, x, y + 2, 15, { mono: true, color: okc(ok), weight: 600 }); };
-    const items = [['ALT TO ARMS', `${fmt(Math.max(0, alt))} m`, null], ['VERT SPEED', `${fmt(L.vy, 1)} m/s`, vOk], ['OFFSET', `${L.x >= 0 ? '+' : ''}${fmt(L.x, 1)} m`, xOk], ['SIDE DRIFT', `${fmt(L.vx, 1)} m/s`, hOk]];
+    const cell = (k, v, x, y, col) => { text(k, x, y - 14, 8.5, { ls: 1.8, color: '#9aa0a8' }); text(v, x, y + 2, 15, { mono: true, color: col || '#fff', weight: 600 }); };
+    const items = [['ALT TO ARMS', `${fmt(Math.max(0, alt))} m`, '#fff'], ['VERT SPEED', `↓ ${fmt(st.spd, 1)} / ${fmt(st.limit, 1)}`, st.color], ['OFFSET', `${L.x >= 0 ? '+' : ''}${fmt(L.x, 1)} m`, okc(xOk)], ['SIDE DRIFT', `${fmt(L.vx, 1)} m/s`, okc(hOk)]];
     if (landscape) {
       const cw = (W - 90) / 4; items.forEach((it, i) => cell(it[0], it[1], 14 + i * cw, 30, it[2]));
       offsetBar(L, pred, 22, 62, W * 0.5);
@@ -1052,19 +1107,19 @@ function landingHUD(pred) {
     return;
   }
   const lx = Math.max(24, W * 0.05), ty = 70;
-  const row = (k, v, y, ok) => { text(k, lx, y, 10, { ls: 2.5, color: '#9aa0a8' }); text(v, lx + 110, y, 17, { mono: true, color: okc(ok) }); };
+  const row = (k, v, y, col) => { text(k, lx, y, 10, { ls: 2.5, color: '#9aa0a8' }); text(v, lx + 110, y, 17, { mono: true, color: col || '#fff' }); };
   text('SUPER HEAVY · RETURN TO TOWER', lx, ty - 22, 10, { ls: 4, color: '#9aa0a8' });
-  row('ALT TO ARMS', `${fmt(Math.max(0, alt))} m`, ty);
-  row('VERT SPEED', `${fmt(L.vy, 1)} m/s`, ty + 26, vOk);
-  row('OFFSET', `${L.x >= 0 ? '+' : ''}${fmt(L.x, 1)} m`, ty + 52, xOk);
-  row('SIDE DRIFT', `${fmt(L.vx, 1)} m/s`, ty + 78, hOk);
+  row('ALT TO ARMS', `${fmt(Math.max(0, alt))} m`, ty, '#fff');
+  row('VERT SPEED', `↓ ${fmt(st.spd, 1)} / ${fmt(st.limit, 1)} m/s`, ty + 26, st.color);
+  row('OFFSET', `${L.x >= 0 ? '+' : ''}${fmt(L.x, 1)} m`, ty + 52, okc(xOk));
+  row('SIDE DRIFT', `${fmt(L.vx, 1)} m/s`, ty + 78, okc(hOk));
   text(`CATCH WINDOW · |offset| ≤ ${fmt(L.win.x, 1)} m · |v| ≤ ${fmt(L.win.vy, 1)} m/s · |drift| ≤ ${fmt(L.win.vx, 1)} m/s`, lx, ty + 104, 10.5, { mono: true, color: '#9aa0a8' });
   const gw2 = Math.min(220, W * 0.36), rx = W - Math.max(24, W * 0.05) - gw2;
   gauge(rx, ty, gw2, 'THROTTLE', L.lit ? L.thr * 100 : 0, 100, { right: L.lit ? `${Math.round(L.thr * 100)}%` : 'OFF' });
   gauge(rx, ty + 36, gw2, 'LANDING PROPELLANT', L.fuel, Math.max(L.fuel0, 1), { right: `${fmt(L.fuel, 1)} s`, color: L.fuel < 3 ? '#ff4d4d' : '#fff' });
   const bw = Math.min(420, W - 2 * (lx + 290));
   offsetBar(L, pred, W / 2 - bw / 2, ty + 14, bw);
-  if (!L.done && !TOUCH && !DEMO) text('↑/W THROTTLE + (LIGHT BURN) · ↓/S THROTTLE − · ←→/AD STEER', W / 2, 24, 10.5, { align: 'center', ls: 2.5, color: '#8a8f98' });
+  if (!L.done && !TOUCH && !DEMO) text('↑/W HOLD THROTTLE + TO LIGHT AND SLOW DOWN · ↓/S THROTTLE − · ←→/AD STEER', W / 2, 24, 10.5, { align: 'center', ls: 2.5, color: '#8a8f98' });
 }
 
 // ---------------------------------------------------------------- PARTICLES, BANNERS, FX
@@ -1300,7 +1355,7 @@ let last = performance.now();
 function frame(now) { const dt = (now - last) / 1000; last = now; try { tick(dt); } catch (err) { console.error(err); } requestAnimationFrame(frame); }
 
 // test / capture hooks
-window.__game = { S, show, startLaunch, startLanding, startReentry, stage, finish, tick, P, buildFlaws, shareText, MISSIONS, newWeather, stageState, burnAlt, landingPredict };
+window.__game = { S, show, startLaunch, startLanding, startReentry, stage, finish, tick, P, buildFlaws, shareText, MISSIONS, newWeather, stageState, burnAlt, landingPredict, speedState, landPunch };
 window.__advance = (ms, step = 1000 / 60) => { for (let t = 0; t < ms; t += step) tick(step / 1000); };
 if (CAPTURE) SND.startLog(() => S.t);
 
