@@ -41,7 +41,7 @@ const ROLES = [
   { id: 'rec', title: 'RECOVERY / LANDING LEAD', opts: [
     { id: 'lena', name: 'Lena Brooks', trait: 'Catch Specialist', desc: 'Catch window 30% wider.' },
     { id: 'omar', name: 'Omar Haddad', trait: 'Fuel Miser', desc: '+15% landing propellant.' },
-    { id: 'jules', name: 'Jules Park', trait: 'Ignition Caller', desc: 'Shows a live landing-burn ignition marker.' } ] },
+    { id: 'jules', name: 'Jules Park', trait: 'Ignition Caller', desc: 'Adds a seconds-to-burn countdown on the burn line.' } ] },
 ];
 const TIPS = {
   build: [
@@ -71,7 +71,7 @@ const LESSONS = {
     better: 'Lightning within 10 nautical miles is a hard NO-GO. Scrub and try the next day.',
     fact: 'Apollo 12 was struck by lightning twice during launch in November 1969. Strict lightning rules have kept rockets away from charged clouds since.' },
   boostback: { head: 'NOT ENOUGH PROPELLANT TO COME HOME', what: 'The booster burned so long that it did not have enough propellant for the boostback burn.',
-    better: 'Stage earlier, when the LANDING RESERVE gauge sits in the green band.',
+    better: 'Stage earlier, when BOOSTER FUEL is inside the green STAGE WINDOW (the STAGE button pulses green).',
     fact: 'Booster recovery means saving propellant for a boostback burn and a landing burn. That reserve is the price of reuse.' },
   hotstage: { head: 'HOT-STAGING DAMAGE', what: 'The Ship\'s engine plume damaged the booster\'s top dome at separation, and its engines failed to relight for boostback.',
     better: 'Hot staging is worth it, but it carries some risk. Cold staging is gentler and costs the Ship some ΔV.',
@@ -80,7 +80,7 @@ const LESSONS = {
     better: 'Light the landing burn earlier (↑ / W). Aim to arrive at the arms under the catch-speed limit shown on the HUD.',
     fact: 'Super Heavy can\'t really hover: at minimum throttle it barely holds itself up. Recovery is a precisely timed "hoverslam" that reaches zero speed at the catch point.' },
   never: { head: 'LANDING BURN NEVER LIT', what: 'The engines never relit for landing, so the booster fell at full speed.',
-    better: 'Press ↑ / W to light the landing burn. Watch for the LANDING BURN cue.',
+    better: 'Light the landing burn with THROTTLE + (↑ / W) when the booster reaches the BURN LINE.',
     fact: 'After separation a booster falls at hundreds of km/h. Only the landing burn slows it to a gentle catch.' },
   offcenter: { head: 'MISSED THE CHOPSTICKS', what: 'The booster arrived off-center and struck the arms instead of settling between them.',
     better: 'Steer with ← / → early, while the booster is high. Small corrections far up beat big ones near the tower.',
@@ -467,6 +467,32 @@ function startLaunch() {
   S.ship = null; S.land = null; S.re = null;
   S.scene = 'ascent'; S.timeScale = 1; S.flash = 0; S.banners = []; particles.length = 0;
   banner('STARSHIP · ' + S.mission.name, 'T-3 · IGNITION SEQUENCE', 2.4);
+  maybeTutorial();
+}
+const TUT = [
+  ['THROTTLE', () => TOUCH ? '<b>THROTTLE +</b> and <b>THROTTLE −</b> set engine power; the bar between them shows the %. Ease off before <b>MAX-Q</b> so the air doesn\'t crush the rocket, then go back to full. The coach line tells you when.' : '<kbd>↑</kbd>/<kbd>W</kbd> is <b>THROTTLE +</b>, <kbd>↓</kbd>/<kbd>S</kbd> is <b>THROTTLE −</b>. Ease off before <b>MAX-Q</b> so the air doesn\'t crush the rocket, then go back to full. The coach line tells you when.'],
+  ['STAGING', () => `Watch <b>BOOSTER FUEL</b>. When it reaches the green <b>STAGE WINDOW</b>, ${TOUCH ? 'tap <b>STAGE</b> (it pulses green)' : 'press <kbd>SPACE</kbd>'}. Too early and the Ship is short on speed. Too late and the booster can't fly home.`],
+  ['THE CATCH', () => `Steer ${TOUCH ? '<b>◀ ▶</b>' : '<kbd>←</kbd><kbd>→</kbd>'} to keep the booster in the green laser above the arms and the <b>◆ predicted touchdown</b> between them. At the <b>BURN LINE</b>, ${TOUCH ? 'tap <b>THROTTLE +</b>' : 'press <kbd>↑</kbd>'} to light the burn, then feather it until vertical speed turns green. The <b>ARMS CAM</b> zooms in for the last 300 m.`]
+];
+let tutStep = 0;
+function tutorialSeen() { try { return localStorage.getItem('chop-tut') === '1'; } catch (e) { return true; } }
+function maybeTutorial() { if (qs.get('tutorial') === '1' || (!DEMO && !CAPTURE && !tutorialSeen())) { tutStep = 0; S.paused = true; renderTut(); $('#tutorial').classList.remove('hidden'); } }
+function renderTut() { const [h, p] = TUT[tutStep]; $('#tut-n').textContent = `${tutStep + 1} / ${TUT.length}`; $('#tut-h').textContent = h; $('#tut-p').innerHTML = p(); $('#tut-next').textContent = tutStep < TUT.length - 1 ? 'NEXT' : 'GOT IT · FLY'; }
+function closeTut() { $('#tutorial').classList.add('hidden'); S.paused = false; try { localStorage.setItem('chop-tut', '1'); } catch (e) {} }
+$('#tut-next').addEventListener('click', () => { if (tutStep < TUT.length - 1) { tutStep++; renderTut(); } else closeTut(); });
+$('#tut-skip').addEventListener('click', closeTut);
+function touchSync() {
+  const m = $('#thr-meter'); if (!m) return;
+  let thr = null;
+  if (S.scene === 'ascent' && S.asc && S.asc.st) thr = S.asc.st.throttle;
+  else if (S.scene === 'landing' && S.land) thr = S.land.lit ? S.land.thr : 0;
+  if (thr != null) { m.querySelector('i').style.height = Math.round(thr * 100) + '%'; m.querySelector('b').textContent = Math.round(thr * 100) + '%'; }
+  const A = S.asc, ss = S.scene === 'ascent' && A && A.st ? stageState(A, P.reserveFrac(A.st)) : '';
+  const sb = $('#stage-btn'); sb.classList.toggle('ready', ss === 'window'); sb.classList.toggle('late', ss === 'late');
+  const L = S.land, lb = $('#burn-lbl'), bb = $('#burn-btn');
+  const needBurn = S.scene === 'landing' && L && !L.lit && !L.done && L.fuel > 0;
+  lb.textContent = needBurn ? 'LIGHT BURN' : 'THROTTLE';
+  bb.classList.toggle('ready', !!(needBurn && L.igniteCued));
 }
 function ascentUpdate(dt) {
   const A = S.asc, st = A.st, v = A.v;
@@ -520,7 +546,8 @@ function ascentUpdate(dt) {
   const res = P.reserveFrac(st);
   if (res <= A.target + 0.05 && !A.promptShown) { A.promptShown = true;
     if (A.flaws.has('dry')) banner('FLIGHT COMPUTER: EXTENDING BURN', 'Ship is short on ΔV · spending the landing reserve', 3, '#ffc53d');
-    else banner('PREPARE FOR STAGING', 'Press SPACE when the reserve needle is in the green', 2.6); }
+    else { banner('PREPARE FOR STAGING', W < 700 || LS() ? 'Stage in the green window' : TOUCH ? 'Tap STAGE when BOOSTER FUEL reaches the green STAGE WINDOW' : 'Press SPACE when BOOSTER FUEL reaches the green STAGE WINDOW', 2.6);
+      tip('Stage inside the green STAGE WINDOW. Too early and the Ship is short on speed to reach orbit. Too late and the booster has no fuel left to fly home to the tower.', 8); } }
   if (A.flaws.has('dry')) { if (res <= P.BOOSTBACK_COST - v.s.reserveBonus + 0.003) stage(true); return; }
   if ((DEMO || S.auto) && res <= A.target + 0.004) stage();
   if (res <= 0.02) stage(true);
@@ -616,6 +643,47 @@ function gauge(x, y, w, label, val, max, opts = {}) {
   ctx.fillStyle = opts.color || '#fff'; ctx.fillRect(x, y, w * clamp(val / max, 0, 1), 6);
   if (opts.limit) { ctx.fillStyle = '#ff4d4d'; ctx.fillRect(x + w * opts.limit / max - 1, y - 4, 2, 14); }
   if (opts.right) text(opts.right, x + w, y - 6, 11, { align: 'right', mono: true, color: opts.rc || '#fff' });
+  if (opts.bandLabel && opts.band) {
+    const bx = x + w * (opts.band[0] + opts.band[1]) / 2 / max, on = opts.bandOn;
+    ctx.fillStyle = on ? `rgba(61,220,132,${0.6 + 0.4 * Math.sin(S.t * 9)})` : 'rgba(61,220,132,.9)';
+    ctx.fillRect(x + w * opts.band[0] / max, y - 3, w * (opts.band[1] - opts.band[0]) / max, 12);
+    ctx.fillStyle = '#fff'; ctx.fillRect(x + w * clamp(val / max, 0, 1) - 1, y - 5, 2, 16);
+    text('▲ ' + opts.bandLabel, clamp(bx, x + 40, x + w - 40), y + 20, 9, { align: 'center', ls: 2, color: '#3ddc84', weight: 600 });
+  }
+}
+function rr(x, y, w, h, r) { ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+function coachDraw(c, y, narrow) {
+  if (!c) return;
+  let size = narrow ? 12 : 14.5; const ls = narrow ? 1.6 : 3;
+  let w; ctx.save(); spacing(ls);
+  for (; ; size -= 0.5) { ctx.font = `600 ${size}px Helvetica Neue, Helvetica, Arial, sans-serif`; w = ctx.measureText(c.t).width + 30; if (w <= W - 12 || size <= 8.5) break; }
+  ctx.restore(); w = Math.min(W - 12, w);
+  const a = c.pulse ? 0.82 + 0.18 * Math.sin(S.t * 9) : 1;
+  ctx.save(); rr(W / 2 - w / 2, y - size - 9, w, size + 20, (size + 20) / 2); ctx.fillStyle = 'rgba(0,0,0,.62)'; ctx.fill();
+  ctx.globalAlpha = a; ctx.strokeStyle = c.c; ctx.lineWidth = 1.4; ctx.stroke(); ctx.restore();
+  text(c.t, W / 2, y + 1, size, { align: 'center', ls, color: c.c, alpha: a, weight: 600 });
+}
+function stageState(A, res) {
+  if (!A || A.staged || A.failed || !A.promptShown || A.flaws.has('dry')) return '';
+  if (res > A.target + A.band) return 'soon';
+  if (res >= A.target - A.band / 2) return 'window';
+  return 'late';
+}
+function ascentCoach(A, st, v, res) {
+  if (A.countdown > 0 || A.staged || A.failed) return null;
+  const ss = stageState(A, res);
+  if (ss === 'window') return { t: TOUCH ? 'STAGE NOW · TAP STAGE' : 'STAGE NOW · PRESS SPACE', c: '#3ddc84', pulse: true };
+  if (ss === 'late') return { t: 'BOOSTER FUEL LOW: STAGE!', c: '#ff4d4d', pulse: true };
+  if (ss === 'soon') return { t: 'STAGE WINDOW AHEAD · WATCH BOOSTER FUEL', c: '#ffffff' };
+  if (A.promptShown) return null;
+  const minus = TOUCH ? 'THROTTLE −' : 'THROTTLE ↓ / S', plus = TOUCH ? 'THROTTLE +' : 'THROTTLE ↑ / W';
+  const hi = st.load > v.limit * 0.87, preQ = !A.maxQcalled && st.t > 6 && st.t < 95;
+  if (v.pf.id === 'aggressive' && st.t < 100) return hi ? { t: 'HIGH LOAD · THROTTLE LOCKED BY BUILD', c: '#ffc53d', pulse: true } : preQ ? { t: 'MAX-Q AHEAD · AGGRESSIVE PROFILE', c: '#9aa0a8' } : null;
+  if (hi) return { t: `HIGH LOAD: HOLD ${minus}`, c: '#ffc53d', pulse: true };
+  if (preQ && st.load > v.limit * 0.45) return v.pf.id === 'auto' ? { t: 'MAX-Q AHEAD: AUTO-THROTTLE EASING', c: '#9fd3ff' } : { t: `MAX-Q AHEAD: EASE ${minus}`, c: '#ffc53d' };
+  if (preQ) return { t: 'CLIMBING · WATCH THE LOAD BAR', c: '#9aa0a8' };
+  if (st.throttle < 0.97) return v.pf.id === 'auto' && st.t < 110 ? { t: 'PAST MAX-Q: AUTO-THROTTLE TO 100%', c: '#9fd3ff' } : { t: `PAST MAX-Q: FULL ${plus}`, c: '#3ddc84', pulse: true };
+  return { t: 'PAST MAX-Q · FULL THROTTLE', c: '#9aa0a8' };
 }
 function drawEngines(x, y, r, v, out) {
   const rings = v.e.ring; const total = v.e.count; let idx = 0;
@@ -627,24 +695,25 @@ function drawEngines(x, y, r, v, out) {
 }
 function ascentHUD() {
   const A = S.asc, st = A.st, v = A.v;
-  const narrow = W < 700;
+  const narrow = W < 700 || H < 500;
   const speed = Math.hypot(st.vx, st.vy) * 3.6;
   const tt = Math.max(0, st.t) | 0; const ts = `T+ ${String(tt / 3600 | 0).padStart(2, '0')}:${String((tt / 60 | 0) % 60).padStart(2, '0')}:${String(tt % 60).padStart(2, '0')}`;
   const res = P.reserveFrac(st), loadK = st.load / 1000, lim = v.limit / 1000;
   const loadOpts = { limit: lim, color: loadK > lim ? '#ff4d4d' : loadK > lim * 0.87 ? '#ffc53d' : '#fff', right: `${fmt(loadK, 1)} kPa`, rc: loadK > lim ? '#ff4d4d' : '#fff' };
-  const resOpts = { band: [(A.target - A.band / 2) * 100, (A.target + A.band) * 100], right: `${fmt(res * 100, 1)}%`, color: '#fff' };
+  const ss = stageState(A, res);
+  const resOpts = { band: [(A.target - A.band / 2) * 100, (A.target + A.band) * 100], right: `${fmt(res * 100, 1)}%`, color: ss === 'late' ? '#ff4d4d' : 'rgba(255,255,255,.75)', rc: ss === 'late' ? '#ff4d4d' : ss === 'window' ? '#3ddc84' : '#fff', bandLabel: A.flaws.has('dry') ? null : 'STAGE WINDOW', bandOn: ss === 'window' };
   if (narrow) {
     const grd = ctx.createLinearGradient(0, 0, 0, 200); grd.addColorStop(0, 'rgba(0,0,0,.85)'); grd.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = grd; ctx.fillRect(0, 0, W, 200);
     text(A.countdown > 0 ? `T- 00:00:0${Math.ceil(A.countdown)}` : ts, W / 2, 44, 24, { align: 'center', mono: true, ls: 2 });
     text('STARSHIP ' + S.mission.name, W / 2, 62, 9, { align: 'center', ls: 3, color: '#9aa0a8' });
     const lx = 16, y0 = 92;
-    text('SPEED', lx, y0, 9, { ls: 2, color: '#9aa0a8' }); text(`${fmt(speed)} KM/H`, lx + 62, y0, 14, { mono: true });
-    text('ALT', lx, y0 + 22, 9, { ls: 2, color: '#9aa0a8' }); text(`${fmt(st.h / 1000, 1)} KM`, lx + 62, y0 + 22, 14, { mono: true });
-    text('THROTTLE', lx, y0 + 44, 9, { ls: 2, color: '#9aa0a8' }); text(`${Math.round(st.throttle * 100)}%`, lx + 62, y0 + 44, 14, { mono: true, color: st.throttle < 0.95 ? '#9fd3ff' : '#fff' });
-    const gw = W * 0.44, gx = W - gw - 16;
-    gauge(gx, y0 - 2, gw, 'LOAD (MAX-Q)', loadK, 70, loadOpts);
+    text('SPEED', lx, y0, 9, { ls: 2, color: '#9aa0a8' }); text(`${fmt(speed)} KM/H`, lx + (W < 360 ? 66 : 72), y0, W < 360 ? 12.5 : 14, { mono: true });
+    text('ALT', lx, y0 + 22, 9, { ls: 2, color: '#9aa0a8' }); text(`${fmt(st.h / 1000, 1)} KM`, lx + (W < 360 ? 66 : 72), y0 + 22, W < 360 ? 12.5 : 14, { mono: true });
+    text('THROTTLE', lx, y0 + 44, 9, { ls: 2, color: '#9aa0a8' }); text(`${Math.round(st.throttle * 100)}%`, lx + (W < 360 ? 66 : 72), y0 + 44, W < 360 ? 12.5 : 14, { mono: true, color: st.throttle < 0.95 ? '#9fd3ff' : '#fff' });
+    const gw = W * (W < 360 ? 0.4 : 0.44), gx = W - gw - 16;
+    gauge(gx, y0 - 2, gw, W < 360 ? 'LOAD' : 'LOAD (MAX-Q)', loadK, 70, loadOpts);
     if (st.stress > 0.02) { ctx.fillStyle = '#ff4d4d'; ctx.fillRect(gx, y0 + 7, gw * clamp(st.stress, 0, 1), 2); }
-    gauge(gx, y0 + 34, gw, 'LANDING RESERVE', res * 100, 100 * v.boosterProp / P.BOOSTER_PROP, resOpts);
+    gauge(gx, y0 + 34, gw, W < 360 ? 'FUEL' : 'BOOSTER FUEL', res * 100, 100 * v.boosterProp / P.BOOSTER_PROP, resOpts);
     drawEngines(W - 34, 44, 18, v, st.enginesOut);
   } else {
   const by = H - 110;
@@ -659,17 +728,12 @@ function ascentHUD() {
   const gw = Math.min(280, W * 0.26), gx = W - gw - Math.max(24, W * 0.05) - 90;
   gauge(gx, by - 4, gw, 'STRUCTURAL LOAD (MAX-Q)', loadK, 70, loadOpts);
   if (st.stress > 0.02) { ctx.fillStyle = '#ff4d4d'; ctx.fillRect(gx, by + 5, gw * clamp(st.stress, 0, 1), 2); }
-  gauge(gx, by + 30, gw, 'LANDING RESERVE', res * 100, 100 * v.boosterProp / P.BOOSTER_PROP, resOpts);
-  text(`MAX-Q ${fmt(st.maxQ / 1000, 1)} kPa · Q ${fmt(st.q / 1000, 1)} kPa · ${fmt(st.accel || 0, 1)} G`, gx, by + 62, 10.5, { mono: true, color: '#9aa0a8' });
+  gauge(gx, by + 30, gw, 'BOOSTER FUEL', res * 100, 100 * v.boosterProp / P.BOOSTER_PROP, resOpts);
+  text(`MAX-Q ${fmt(st.maxQ / 1000, 1)} kPa · Q ${fmt(st.q / 1000, 1)} kPa · ${fmt(st.accel || 0, 1)} G`, gx, by + 66, 10.5, { mono: true, color: '#9aa0a8' });
   drawEngines(W - Math.max(24, W * 0.05) - 36, by + 22, 34, v, st.enginesOut);
   }
-  // staging prompt
-  if (!A.staged && !A.failed && A.promptShown) {
-    const inBand = res <= A.target + A.band && res >= A.target - A.band / 2;
-    const pulse = 0.6 + 0.4 * Math.sin(S.t * 8);
-    text(inBand ? (TOUCH ? 'STAGE NOW · TAP STAGE' : 'STAGE NOW · PRESS SPACE') : (TOUCH ? 'STAGING SOON' : 'STAGING SOON · SPACE'), W / 2, narrow ? H * 0.58 : H * 0.16, narrow ? 15 : 18, { align: 'center', ls: 5, color: inBand ? '#3ddc84' : '#fff', alpha: inBand ? pulse : 0.8 });
-  }
-  if (!A.staged && st.load > v.limit * 0.87 && !A.failed) text(v.pf.id === 'aggressive' ? 'HIGH LOAD · THROTTLE LOCKED' : 'HIGH LOAD · THROTTLE DOWN ↓', W / 2, narrow ? H * 0.62 : H * 0.22, narrow ? 12 : 14, { align: 'center', ls: 4, color: '#ffc53d', alpha: 0.6 + 0.4 * Math.sin(S.t * 10) });
+  coachDraw(ascentCoach(A, st, v, res), LS() ? H - 104 : narrow ? Math.min(H * 0.6, H - 150) : H * 0.17, narrow);
+  if (!TOUCH && !narrow && A.countdown <= 0 && !A.staged && !A.failed) text('↑/W THROTTLE +  ·  ↓/S THROTTLE −  ·  SPACE STAGE', W / 2, 24, 10, { align: 'center', ls: 2.5, color: '#8a8f98' });
 }
 
 // ---------------------------------------------------------------- BOOSTBACK + LANDING
@@ -717,9 +781,9 @@ function startLanding() {
   S.land = { x: side * (35 + rng() * 25) * Math.min(1, y0 / 1900), y: y0, vx: -side * (1 + rng() * 3), vy: vy0, thr: 0, fuel, fuel0: fuel, lit: false, everLit: false, lat: fins.lateral, steer: 0,
     win: { x: 3.5 * k, vy: 5.5 * k, vx: 2.5 * k }, catchY: 36, windDir: rng() < 0.5 ? -1 : 1, windPh: rng() * 6, t: 0, done: false, caught: false, cam: { sc: 0.3, cy: 900 }, armClose: 0, prevY: y0, minAlt: 1e9, igniteCued: false };
   S.scene = 'landing'; S.timeScale = 1;
-  banner('BOOSTER RETURN', TOUCH ? 'Light the landing burn ▲ · Steer ◀ ▶' : 'Light the landing burn ↑ / W · Steer ← → / A D', 3.2);
+  banner('BOOSTER RETURN', TOUCH ? 'Steer ◀ ▶ into the green laser · Burn at the BURN LINE' : 'Steer ← → into the green laser · Burn ↑ at the BURN LINE', 3.2);
   SND.play('fins', { dur: 1.2 });
-  tipFlight('Super Heavy can\'t hover. Light the landing burn late but not too late, and line up with the chopsticks early.');
+  tipFlight('Line up early: keep the booster inside the green laser and the ◆ predicted touchdown between the arms. Light the burn at the BURN LINE; Super Heavy can\'t hover.');
 }
 function windAccel(L) { return S.wx.wind * 0.05 * L.windDir * (0.55 + 0.45 * Math.sin(L.t * 0.7 + L.windPh)); }
 const A_MAX = 27, MIN_THR = 0.35, G = 9.81;
@@ -741,7 +805,7 @@ function landingUpdate(dt) {
   L.vx += ax * dt; L.vy += ay * dt; L.prevY = L.y; L.x += L.vx * dt; L.y += L.vy * dt;
   const stopD = L.vy < 0 ? (L.vy * L.vy) / (2 * (A_MAX - G)) : 0;
   L.stopD = stopD;
-  if (!L.everLit && !L.igniteCued && L.y - L.catchY < stopD * 1.25 + 60) { L.igniteCued = true; banner('LANDING BURN · NOW', 'Press ↑ / W', 2, '#3ddc84'); }
+  if (!L.everLit && !L.igniteCued && L.y <= burnAlt(L)) { L.igniteCued = true; banner('LANDING BURN · NOW', TOUCH ? 'Tap THROTTLE +' : 'Press ↑ / W', 2, '#3ddc84'); }
   // catch check
   if (L.prevY > L.catchY && L.y <= L.catchY) {
     const dx = Math.abs(L.x), dvy = Math.abs(L.vy), dvx = Math.abs(L.vx);
@@ -789,87 +853,215 @@ function waveOff() {
   banner('WAVE-OFF', 'Booster diverting to the Gulf of Mexico', 2.6, '#ffc53d');
   later(2.6, () => finish({ kind: 'divert' }));
 }
-function landingDraw() {
-  const L = S.land;
-  // camera: keep booster and arms in view
-  const top = Math.max(L.y + 80, 180);
-  const targetSc = clamp(H * 0.8 / (top + 20), 0.9, 4.2);
-  L.cam.sc = lerp(L.cam.sc, targetSc, 0.08);
-  const sc = L.cam.sc;
-  const gy = H * 0.9 + Math.max(0, (L.y + 71) * sc - H * (W < 700 ? 0.45 : 0.62)); // ground line screen (camera follows booster when high)
-  const cx = W / 2 - clamp(L.x, -60, 60) * sc * 0.3;
-  const toS = (x, y) => [cx + x * sc, gy - y * sc];
-  drawSky(clamp(L.y * 6, 0, 30000));
-  // ground & sea
-  ctx.fillStyle = '#0b0d10'; ctx.fillRect(0, gy, W, H - gy);
-  ctx.fillStyle = '#071019'; const seaX = toS(220, 0)[0]; ctx.fillRect(seaX, gy, W - seaX, H - gy);
-  ctx.fillStyle = 'rgba(255,255,255,.1)'; ctx.fillRect(0, gy, W, 1);
-  // tower (front view, centered behind catch point)
+// ---- landing guidance helpers
+function burnAlt(L) { const v = Math.max(0, -L.vy); return L.catchY + v * v / (2 * (A_MAX - G)) * 1.25 + 60; }
+function landingPredict(L) {
+  const hgt = Math.max(0, L.y - L.catchY), sp = Math.max(4, -L.vy), burnH = Math.max(0, burnAlt(L) - L.catchY);
+  const slow = Math.max(3, (sp + 3.6) / 2);
+  let T = (L.lit || hgt <= burnH) ? hgt / slow : (hgt - burnH) / sp + burnH / slow;
+  T = Math.min(T, 12);
+  return { x: L.x + L.vx * T + 0.5 * windAccel(L) * T * T * 0.6, T };
+}
+function pipOn(L) { const h = L.y - L.catchY; return !L.done && h < 320; }
+function LS() { return H < 500 && W > H; }
+function compactHUD() { return W < 700 || H < 500; }
+function pipRect() {
+  if (LS()) { const h = Math.round(H - 90 - 118), w = Math.round(h * 0.9); return { x: W - w - 14, y: 88, w, h }; }
+  if (W < 700) { const w = Math.round(Math.min(W * 0.4, 190)); return { x: W - w - 10, y: 170, w, h: Math.round(w * 1.15) }; }
+  const w = Math.round(clamp(H * 0.32, 160, 240)); return { x: W - w - Math.max(24, W * 0.05), y: Math.round(H * 0.33), w, h: Math.round(w * 1.12) };
+}
+// tower, arms, laser corridor, predicted touchdown and booster, for a given camera
+function drawCatchWorld(L, toS, sc, o = {}) {
   const [tx, ty] = toS(0, 0);
   const tw = 12 * sc, th = 146 * sc;
   ctx.save(); ctx.fillStyle = '#121519'; ctx.fillRect(tx - tw / 2, ty - th, tw, th);
   ctx.strokeStyle = '#59606a'; ctx.lineWidth = Math.max(0.5, sc * 0.3);
   for (let i = 0; i < 24; i++) { const y0 = ty - th * i / 24, y1 = ty - th * (i + 1) / 24; ctx.beginPath(); ctx.moveTo(tx - tw / 2, y0); ctx.lineTo(tx + tw / 2, y1); ctx.moveTo(tx + tw / 2, y0); ctx.lineTo(tx - tw / 2, y1); ctx.stroke(); }
   ctx.strokeRect(tx - tw / 2, ty - th, tw, th); ctx.restore();
-  // launch mount
   ctx.fillStyle = '#2b3037'; ctx.fillRect(tx - 16 * sc, ty - 22 * sc, 32 * sc, 4 * sc); ctx.fillRect(tx - 15 * sc, ty - 22 * sc, 3 * sc, 22 * sc); ctx.fillRect(tx + 12 * sc, ty - 22 * sc, 3 * sc, 22 * sc);
-  // chopsticks
-  const armY = 100;
-  const close = L.caught ? L.armClose : 0;
-  const gap = lerp(16, 5.6, close);
+  const armY = 100, close = L.caught ? L.armClose : 0, gap = lerp(16, 5.6, close);
   const [, ay] = toS(0, armY);
+  const aligned = Math.abs(L.x) <= L.win.x, pred = o.pred, predOk = pred && Math.abs(pred.x) <= L.win.x;
+  // laser guide + landing corridor straight up from the arms
+  if (!L.done) {
+    const col = aligned ? '61,220,132' : '255,197,61';
+    const top = o.clipTop || 0;
+    const g = ctx.createLinearGradient(0, ay, 0, top); g.addColorStop(0, `rgba(${col},.95)`); g.addColorStop(1, `rgba(${col},.15)`);
+    ctx.fillStyle = `rgba(${col},${o.pip ? 0.1 : 0.08})`; ctx.fillRect(tx - L.win.x * sc, top, 2 * L.win.x * sc, ay - top);
+    ctx.fillStyle = g; ctx.fillRect(tx - 0.75, top, 1.5, ay - top);
+    ctx.fillStyle = `rgba(${col},.35)`; ctx.fillRect(tx - L.win.x * sc - 0.5, top, 1, ay - top); ctx.fillRect(tx + L.win.x * sc - 0.5, top, 1, ay - top);
+  }
+  // chopsticks + arm targets
   ctx.fillStyle = '#c9ced5';
-  ctx.fillRect(tx - tw / 2 - 2 * sc, ay - 4 * sc, tw + 4 * sc, 6 * sc); // carriage
+  ctx.fillRect(tx - tw / 2 - 2 * sc, ay - 4 * sc, tw + 4 * sc, 6 * sc);
   ctx.fillRect(tx - gap * sc - 22 * sc, ay - 2.2 * sc, 22 * sc, 2.6 * sc);
   ctx.fillRect(tx + gap * sc, ay - 2.2 * sc, 22 * sc, 2.6 * sc);
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(tx - gap * sc - 1.2 * sc, ay - 3 * sc, 1.2 * sc, 4 * sc); ctx.fillRect(tx + gap * sc, ay - 3 * sc, 1.2 * sc, 4 * sc);
-  // catch window bracket
+  ctx.save();
+  const glow = L.caught || (!L.done && aligned);
+  if (glow) { ctx.shadowColor = '#3ddc84'; ctx.shadowBlur = o.pip ? 18 : 12; ctx.fillStyle = '#3ddc84'; } else ctx.fillStyle = L.done ? '#ffffff' : '#ffc53d';
+  const tW = Math.max(2, 1.6 * sc), tH = Math.max(5, 5 * sc);
+  ctx.fillRect(tx - gap * sc - tW, ay - tH * 0.7, tW, tH); ctx.fillRect(tx + gap * sc, ay - tH * 0.7, tW, tH);
+  ctx.restore();
   if (!L.done) {
-    const ok = Math.abs(L.x) <= L.win.x && Math.abs(L.vy) <= L.win.vy && Math.abs(L.vx) <= L.win.vx;
+    const ok = aligned && Math.abs(L.vy) <= L.win.vy && Math.abs(L.vx) <= L.win.vx;
     ctx.strokeStyle = ok ? 'rgba(61,220,132,.9)' : 'rgba(255,255,255,.35)'; ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
     ctx.strokeRect(tx - (4.5 + L.win.x) * sc, ay - 14 * sc, (9 + 2 * L.win.x) * sc, 18 * sc); ctx.setLineDash([]);
-  }
-  // ignition marker
-  if (!L.done && has('jules') && L.vy < 0) {
-    const [, my] = toS(0, L.catchY + L.stopD * 1.05 + 64);
-    ctx.strokeStyle = 'rgba(159,211,255,.8)'; ctx.setLineDash([8, 6]); ctx.beginPath(); ctx.moveTo(0, my); ctx.lineTo(W, my); ctx.stroke(); ctx.setLineDash([]);
-    text('IGNITION LINE', 14, my - 6, 10, { ls: 3, color: '#9fd3ff' });
+    // predicted touchdown at arm height
+    if (pred) {
+      const [pxs] = toS(clamp(pred.x, -70, 70), armY), px = clamp(pxs, 8, W - 8), r = o.pip ? 7 : 6;
+      ctx.save(); ctx.strokeStyle = predOk ? '#3ddc84' : '#ffc53d'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(px, ay - 9 * (o.pip ? 1.4 : 1) - r); ctx.lineTo(px + r, ay - 9 * (o.pip ? 1.4 : 1)); ctx.lineTo(px, ay - 9 * (o.pip ? 1.4 : 1) + r); ctx.lineTo(px - r, ay - 9 * (o.pip ? 1.4 : 1)); ctx.closePath(); ctx.stroke(); ctx.restore();
+      if (o.main && !o.pip) text('PREDICTED', px, ay - 9 - r - 5, 8.5, { align: 'center', ls: 1.5, color: predOk ? '#3ddc84' : '#ffc53d' });
+    }
   }
   // booster
   if (!L.exploded) {
     const [bx, byy] = toS(L.x, L.y);
+    if (o.pip && !L.done) { // booster's own centreline down to the arms
+      ctx.save(); ctx.strokeStyle = aligned ? 'rgba(61,220,132,.9)' : 'rgba(255,255,255,.75)'; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(bx, Math.max(o.clipTop || 0, Math.min(byy - 71 * sc, ay))); ctx.lineTo(bx, ay + 12); ctx.stroke(); ctx.restore();
+    }
     const tilt = L.caught ? 0 : clamp(L.steer * 0.08 + L.vx * 0.006, -0.22, 0.22);
     ctx.save(); ctx.translate(bx, byy); ctx.rotate(tilt);
     if (L.lit) drawFlame(sc, L.thr, 0.1, 5);
-    else if (L.sputter > 0) { L.sputter -= 1 / 60; if (Math.random() < 0.45) drawFlame(sc, 0.3 + Math.random() * 0.4, 0.1, 4); }
+    else if (L.sputter > 0 && o.main) { L.sputter -= 1 / 60; if (Math.random() < 0.45) drawFlame(sc, 0.3 + Math.random() * 0.4, 0.1, 4); }
     drawBooster(sc, 1); ctx.restore();
-    if (sc < 0.6) { ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.beginPath(); ctx.arc(bx, byy - 36 * sc, 16, 0, Math.PI * 2); ctx.stroke(); }
+    if (o.main && sc < 0.6) { ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.beginPath(); ctx.arc(bx, byy - 36 * sc, 16, 0, Math.PI * 2); ctx.stroke(); }
+  }
+}
+function landingDraw() {
+  const L = S.land, compact = compactHUD(), hgt = L.y - L.catchY, pip = pipOn(L);
+  // camera: follow the booster when high; in the last ~400 m frame both the booster and the arms
+  const top = Math.max(L.y + 80, 180);
+  let targetSc = clamp(H * 0.8 / (top + 20), 0.9, 4.2);
+  if (hgt < 420) targetSc = Math.min(targetSc, Math.max(0.9, H * (compact ? 0.5 : 0.56) / Math.max(60, L.y - 29)));
+  L.cam.sc = lerp(L.cam.sc, targetSc, 0.08);
+  const sc = L.cam.sc;
+  const lowA = LS() ? 0.3 : W < 700 ? 0.28 : 0.2;
+  const anchor = H * lerp(lowA, W < 700 && !LS() ? 0.45 : 0.38, clamp((hgt - 300) / 300, 0, 1));
+  const gy = Math.max(H * (H < 500 ? 0.88 : 0.9), anchor + (L.y + 71) * sc);
+  const R = pipRect();
+  const colC = pip && (W < 700 || LS()) ? (R.x - 6) / 2 : W / 2;
+  L.cam.cx = lerp(L.cam.cx == null ? colC : L.cam.cx, colC, 0.08);
+  const cx = L.cam.cx - clamp(L.x, -60, 60) * sc * 0.3;
+  const toS = (x, y) => [cx + x * sc, gy - y * sc];
+  drawSky(clamp(L.y * 6, 0, 30000));
+  ctx.fillStyle = '#0b0d10'; ctx.fillRect(0, gy, W, H - gy);
+  ctx.fillStyle = '#071019'; const seaX = toS(220, 0)[0]; ctx.fillRect(seaX, gy, W - seaX, H - gy);
+  ctx.fillStyle = 'rgba(255,255,255,.1)'; ctx.fillRect(0, gy, W, 1);
+  const pred = L.done ? null : landingPredict(L);
+  drawCatchWorld(L, toS, sc, { pred, main: true });
+  // burn line (everyone); Jules adds a countdown
+  if (!L.done && !L.everLit && L.vy < 0) {
+    const ba = burnAlt(L), [, my] = toS(0, ba);
+    if (my > 0 && my < H) {
+      const now = L.y <= ba;
+      ctx.strokeStyle = now ? 'rgba(61,220,132,.95)' : 'rgba(159,211,255,.8)'; ctx.setLineDash([8, 6]); ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(0, my); ctx.lineTo(W, my); ctx.stroke(); ctx.setLineDash([]);
+      const secs = has('jules') ? ` · ${fmt(Math.max(0, (L.y - ba) / Math.max(1, -L.vy)), 1)} s` : '';
+      text(`BURN LINE${secs}`, 12, my - 6, 10, { ls: 3, color: now ? '#3ddc84' : '#9fd3ff' });
+    }
   }
   drawParticles(toS);
-  if (toS(0, 146)[1] > H - 40 && !L.done) { // tower is below the frame: show a marker
-    const mx = clamp(toS(0, 0)[0], 40, W - 40);
+  if (toS(0, 146)[1] > H - 40 && !L.done) {
+    const mx = clamp(toS(0, 0)[0], 60, W - 60);
     text(`▼ TOWER ${fmt(L.y - L.catchY)} m`, mx, H - (TOUCH ? 140 : 64), 12, { align: 'center', ls: 3, color: '#9fd3ff' });
   }
-  if (!(L.caught)) landingHUD();
+  // speed tag next to the booster while the arms cam is off
+  if (!L.done && !pip) {
+    const [bx, by] = toS(L.x, L.y + 36);
+    const lines = landingTags(L);
+    const right = bx + 4.5 * sc + 12, left = bx - 4.5 * sc - 12, useRight = right + 120 < W || left - 120 < 0;
+    lines.forEach((ln, i) => text(ln[0], useRight ? right : left, clamp(by, 200, H - 170) + i * 17, i ? 11 : 14, { mono: true, align: useRight ? 'left' : 'right', color: ln[1], weight: 600, alpha: ln[2] ? 0.6 + 0.4 * Math.sin(S.t * 10) : 1 }));
+  }
+  if (!L.caught) { if (pip) drawPip(L, pred, R); landingHUD(pred); }
   else if (W >= 700) text('UNOFFICIAL FAN GAME · NOT AFFILIATED WITH OR ENDORSED BY SPACEX', W / 2, 40, 11, { align: 'center', ls: 3, color: '#c9cdd4' });
   else { text('UNOFFICIAL FAN GAME', W / 2, 36, 10, { align: 'center', ls: 3, color: '#c9cdd4' }); text('NOT AFFILIATED WITH OR ENDORSED BY SPACEX', W / 2, 52, 9, { align: 'center', ls: 1.5, color: '#c9cdd4' }); }
 }
-function landingHUD() {
-  const L = S.land, narrow = W < 700, lx = narrow ? 16 : Math.max(24, W * 0.05), ty = 70;
-  const row = (k, v, y, ok) => { text(k, lx, y, 10, { ls: 2.5, color: '#9aa0a8' }); text(v, lx + 110, y, 17, { mono: true, color: ok == null ? '#fff' : ok ? '#3ddc84' : '#ff8a8a' }); };
-  const alt = L.y - L.catchY;
+function landingTags(L) {
+  const vOk = Math.abs(L.vy) <= L.win.vy, out = [[`${L.vy < 0 ? '↓' : '↑'} ${fmt(Math.abs(L.vy), 1)} m/s`, vOk ? '#3ddc84' : '#ffffff']];
+  if (!L.everLit && L.vy < 0) { const ba = burnAlt(L); out.push(L.y <= ba ? ['BURN NOW ▲', '#3ddc84', true] : [`BURN IN ${fmt(L.y - ba)} m`, '#9fd3ff']); }
+  else if (L.lit && L.vy < -L.win.vy && L.y - L.catchY < 120) out.push(['MORE THROTTLE', '#ffc53d', true]);
+  else if (L.lit && L.vy > -1.5) out.push(['EASE THROTTLE', '#ffc53d', true]);
+  return out;
+}
+function drawPip(L, pred, R) {
+  const fade = clamp((320 - (L.y - L.catchY)) / 40, 0, 1);
+  ctx.save(); ctx.globalAlpha = fade;
+  rr(R.x, R.y, R.w, R.h, 10); ctx.save(); ctx.clip();
+  const g = ctx.createLinearGradient(0, R.y, 0, R.y + R.h); g.addColorStop(0, '#16203a'); g.addColorStop(1, '#3a3346'); ctx.fillStyle = g; ctx.fillRect(R.x, R.y, R.w, R.h);
+  const psc = R.w / 40, pcx = R.x + R.w / 2, aySc = R.y + R.h * 0.62, pgy = aySc + 100 * psc;
+  const toP = (x, y) => [pcx + x * psc, pgy - y * psc];
+  drawCatchWorld(L, toP, psc, { pred, pip: true, clipTop: R.y });
+  // booster off-frame indicators
+  const bxp = pcx + L.x * psc, aligned = Math.abs(L.x) <= L.win.x;
+  if (bxp < R.x + 6 || bxp > R.x + R.w - 6) text(`${L.x < 0 ? '◀' : ''} BOOSTER ${fmt(Math.abs(L.x), 0)} m ${L.x > 0 ? '▶' : ''}`, L.x < 0 ? R.x + 8 : R.x + R.w - 8, R.y + 42, 10, { align: L.x < 0 ? 'left' : 'right', color: '#ffc53d', weight: 600 });
+  // readouts inside the cam
+  const tags = landingTags(L);
+  const fs = R.w < 180 ? 15 : 17;
+  ctx.fillStyle = 'rgba(0,0,0,.62)'; ctx.fillRect(R.x, R.y + R.h - 54, R.w, 54);
+  text(tags[0][0], R.x + 9, R.y + R.h - 36, fs, { mono: true, color: tags[0][1], weight: 600 });
+  text(`OFFSET ${L.x >= 0 ? '+' : ''}${fmt(L.x, 1)} m`, R.x + 9, R.y + R.h - 21, 10.5, { mono: true, color: aligned ? '#3ddc84' : '#ffc53d', weight: 600 });
+  if (tags[1]) text(tags[1][0], R.x + 9, R.y + R.h - 7, 10.5, { mono: true, color: tags[1][1], weight: 600, alpha: tags[1][2] ? 0.6 + 0.4 * Math.sin(S.t * 10) : 1 });
+  else text(`CATCH ≤ ${fmt(L.win.vy, 1)} m/s`, R.x + 9, R.y + R.h - 7, 9.5, { mono: true, color: '#9aa0a8' });
+  ctx.restore();
+  ctx.strokeStyle = aligned ? 'rgba(61,220,132,.9)' : 'rgba(255,255,255,.5)'; ctx.lineWidth = 1.5; rr(R.x, R.y, R.w, R.h, 10); ctx.stroke();
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillRect(R.x + 8, R.y + 8, 78, 16);
+  text('● ARMS CAM', R.x + 13, R.y + 20, 9.5, { ls: 1.5, color: '#ff6b6b', weight: 600 });
+  ctx.restore();
+}
+// horizontal offset indicator: tower centre, catch window, booster ▼, predicted ◆, drift and wind arrows
+function offsetBar(L, pred, x, y, w) {
+  const RNG = 30, k = w / (2 * RNG), cx = x + w / 2, aligned = Math.abs(L.x) <= L.win.x;
+  ctx.fillStyle = 'rgba(255,255,255,.14)'; ctx.fillRect(x, y, w, 4);
+  for (let m = -RNG; m <= RNG; m += 10) ctx.fillRect(cx + m * k - 0.5, y - 2, 1, 8);
+  ctx.fillStyle = 'rgba(61,220,132,.55)'; ctx.fillRect(cx - L.win.x * k, y - 3, 2 * L.win.x * k, 10);
+  ctx.fillStyle = '#fff'; ctx.fillRect(cx - 1, y - 6, 2, 16);
+  if (pred) { const p = clamp(cx + pred.x * k, x, x + w), ok = Math.abs(pred.x) <= L.win.x; ctx.strokeStyle = ok ? '#3ddc84' : '#ffc53d'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(p, y - 4); ctx.lineTo(p + 6, y + 2); ctx.lineTo(p, y + 8); ctx.lineTo(p - 6, y + 2); ctx.closePath(); ctx.stroke(); }
+  const b = clamp(cx + L.x * k, x, x + w);
+  ctx.fillStyle = aligned ? '#3ddc84' : '#ffc53d'; ctx.beginPath(); ctx.moveTo(b - 7, y - 13); ctx.lineTo(b + 7, y - 13); ctx.lineTo(b, y - 3); ctx.closePath(); ctx.fill();
+  // drift arrow (side speed) from the booster marker
+  const dl = clamp(L.vx * k * 1.5, -w / 3, w / 3);
+  if (Math.abs(dl) > 3) { ctx.strokeStyle = Math.abs(L.vx) <= L.win.vx ? '#3ddc84' : '#ffc53d'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(b, y - 18); ctx.lineTo(b + dl, y - 18); ctx.stroke(); ctx.beginPath(); ctx.moveTo(b + dl, y - 18); ctx.lineTo(b + dl - Math.sign(dl) * 5, y - 22); ctx.lineTo(b + dl - Math.sign(dl) * 5, y - 14); ctx.closePath(); ctx.fillStyle = ctx.strokeStyle; ctx.fill(); }
+  const wa = windAccel(L), arrow = wa > 0 ? '→' : '←';
+  text(`WIND ${arrow} ${S.wx.wind} KT`, x, y + 22, 9.5, { ls: 1.5, mono: true, color: '#9fd3ff' });
+  text('▼ BOOSTER  ◆ PREDICTED', x + w, y + 22, 9.5, { align: 'right', ls: 1, color: '#9aa0a8' });
+}
+function landingHUD(pred) {
+  const L = S.land, alt = L.y - L.catchY;
+  const vOk = Math.abs(L.vy) <= L.win.vy, xOk = Math.abs(L.x) <= L.win.x, hOk = Math.abs(L.vx) <= L.win.vx;
+  const okc = ok => ok == null ? '#fff' : ok ? '#3ddc84' : '#ffc53d';
+  if (compactHUD()) {
+    const landscape = LS();
+    const hb = landscape ? 84 : 160;
+    const grd = ctx.createLinearGradient(0, 0, 0, hb + 20); grd.addColorStop(0, 'rgba(0,0,0,.85)'); grd.addColorStop(0.8, 'rgba(0,0,0,.6)'); grd.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = grd; ctx.fillRect(0, 0, W, hb + 20);
+    const cell = (k, v, x, y, ok) => { text(k, x, y - 14, 8.5, { ls: 1.8, color: '#9aa0a8' }); text(v, x, y + 2, 15, { mono: true, color: okc(ok), weight: 600 }); };
+    const items = [['ALT TO ARMS', `${fmt(Math.max(0, alt))} m`, null], ['VERT SPEED', `${fmt(L.vy, 1)} m/s`, vOk], ['OFFSET', `${L.x >= 0 ? '+' : ''}${fmt(L.x, 1)} m`, xOk], ['SIDE DRIFT', `${fmt(L.vx, 1)} m/s`, hOk]];
+    if (landscape) {
+      const cw = (W - 90) / 4; items.forEach((it, i) => cell(it[0], it[1], 14 + i * cw, 30, it[2]));
+      offsetBar(L, pred, 22, 62, W * 0.5);
+      gauge(W * 0.6, 62, W * 0.3, 'LANDING PROPELLANT', L.fuel, Math.max(L.fuel0, 1), { right: `${fmt(L.fuel, 1)} s`, color: L.fuel < 3 ? '#ff4d4d' : '#fff' });
+    } else {
+      const c2 = W * 0.47;
+      items.forEach((it, i) => cell(it[0], it[1], i % 2 ? c2 : 14, i < 2 ? 32 : 66, it[2]));
+      offsetBar(L, pred, 22, 98, W - 44);
+      gauge(14, 152, W - 28, 'LANDING PROPELLANT', L.fuel, Math.max(L.fuel0, 1), { right: `${fmt(L.fuel, 1)} s`, color: L.fuel < 3 ? '#ff4d4d' : '#fff' });
+    }
+    return;
+  }
+  const lx = Math.max(24, W * 0.05), ty = 70;
+  const row = (k, v, y, ok) => { text(k, lx, y, 10, { ls: 2.5, color: '#9aa0a8' }); text(v, lx + 110, y, 17, { mono: true, color: okc(ok) }); };
   text('SUPER HEAVY · RETURN TO TOWER', lx, ty - 22, 10, { ls: 4, color: '#9aa0a8' });
   row('ALT TO ARMS', `${fmt(Math.max(0, alt))} m`, ty);
-  row('VERT SPEED', `${fmt(L.vy, 1)} m/s`, ty + 26, Math.abs(L.vy) <= L.win.vy);
-  row('OFFSET', `${L.x >= 0 ? '+' : ''}${fmt(L.x, 1)} m`, ty + 52, Math.abs(L.x) <= L.win.x);
-  row('H-SPEED', `${fmt(L.vx, 1)} m/s`, ty + 78, Math.abs(L.vx) <= L.win.vx);
-  text(narrow ? `CATCH: off ≤ ${fmt(L.win.x, 1)} m · v ≤ ${fmt(L.win.vy, 1)} · h ≤ ${fmt(L.win.vx, 1)} m/s` : `CATCH WINDOW · |offset| ≤ ${fmt(L.win.x, 1)} m · |v| ≤ ${fmt(L.win.vy, 1)} m/s · |h| ≤ ${fmt(L.win.vx, 1)} m/s`, lx, ty + 104, narrow ? 9.5 : 10.5, { mono: true, color: '#9aa0a8' });
-  const gw2 = narrow ? W - 2 * lx : Math.min(220, W * 0.36), rx = narrow ? lx : W - Math.max(24, W * 0.05) - gw2, gy0 = narrow ? ty + 136 : ty;
-  gauge(rx, gy0, gw2, 'THROTTLE', L.lit ? L.thr * 100 : 0, 100, { right: L.lit ? `${Math.round(L.thr * 100)}%` : 'OFF' });
-  gauge(rx, gy0 + 36, gw2, 'LANDING PROPELLANT', L.fuel, Math.max(L.fuel0, 1), { right: `${fmt(L.fuel, 1)} s`, color: L.fuel < 3 ? '#ff4d4d' : '#fff' });
-  const wa = windAccel(L);
-  text(`WIND ${S.wx.wind} KT ${wa > 0 ? '→' : '←'}`, rx, gy0 + (narrow ? 64 : 82), 11, { ls: 2, mono: true, color: '#9aa0a8' });
-  if (!L.done && !TOUCH && W >= 700) text('↑/W THROTTLE UP · ↓/S DOWN · ←→/AD STEER', W / 2, H - 40, 10.5, { align: 'center', ls: 2.5, color: '#8a8f98' });
+  row('VERT SPEED', `${fmt(L.vy, 1)} m/s`, ty + 26, vOk);
+  row('OFFSET', `${L.x >= 0 ? '+' : ''}${fmt(L.x, 1)} m`, ty + 52, xOk);
+  row('SIDE DRIFT', `${fmt(L.vx, 1)} m/s`, ty + 78, hOk);
+  text(`CATCH WINDOW · |offset| ≤ ${fmt(L.win.x, 1)} m · |v| ≤ ${fmt(L.win.vy, 1)} m/s · |drift| ≤ ${fmt(L.win.vx, 1)} m/s`, lx, ty + 104, 10.5, { mono: true, color: '#9aa0a8' });
+  const gw2 = Math.min(220, W * 0.36), rx = W - Math.max(24, W * 0.05) - gw2;
+  gauge(rx, ty, gw2, 'THROTTLE', L.lit ? L.thr * 100 : 0, 100, { right: L.lit ? `${Math.round(L.thr * 100)}%` : 'OFF' });
+  gauge(rx, ty + 36, gw2, 'LANDING PROPELLANT', L.fuel, Math.max(L.fuel0, 1), { right: `${fmt(L.fuel, 1)} s`, color: L.fuel < 3 ? '#ff4d4d' : '#fff' });
+  const bw = Math.min(420, W - 2 * (lx + 290));
+  offsetBar(L, pred, W / 2 - bw / 2, ty + 14, bw);
+  if (!L.done && !TOUCH) text('↑/W THROTTLE + (LIGHT BURN) · ↓/S THROTTLE − · ←→/AD STEER', W / 2, 24, 10.5, { align: 'center', ls: 2.5, color: '#8a8f98' });
 }
 
 // ---------------------------------------------------------------- PARTICLES, BANNERS, FX
@@ -893,9 +1085,9 @@ function updateParticles(dt) {
 function drawBanners(dt) {
   S.banners.forEach((b, i) => {
     b.life -= dt; const age = b.dur - b.life; const a = clamp(Math.min(age * 4, b.life * 2), 0, 1);
-    const y = (S.scene === 'landing' && !(S.land && S.land.caught)) ? H * 0.62 : H * 0.32;
+    const y = (S.scene === 'landing' && !(S.land && S.land.caught)) ? H * 0.62 : LS() ? H * 0.5 : H * 0.32;
     const big = b.t === 'BOOSTER CAUGHT';
-    const size = big ? Math.min(W * 0.085, 92) : Math.min(W * 0.045, 40);
+    const size = big ? Math.min(W * 0.085, 92, H * 0.16) : Math.min(W * 0.045, 40, H * 0.08);
     ctx.save(); ctx.font = `300 ${size}px Helvetica Neue, Helvetica, Arial, sans-serif`; spacing(big ? 14 : 8);
     const tw = ctx.measureText(b.t).width; ctx.restore();
     const fit = Math.min(1, (W * 0.9) / Math.max(1, tw));
@@ -904,7 +1096,8 @@ function drawBanners(dt) {
     if (big) { ctx.shadowColor = 'rgba(255,255,255,.8)'; ctx.shadowBlur = 30; }
     text(b.t, 0, 0, size, { align: 'center', ls: big ? 14 : 8, weight: big ? 300 : 300, color: b.color || '#fff', alpha: a });
     ctx.restore();
-    if (b.sub) text(b.sub, W / 2, y + size * 0.55 + 18, big ? 16 : 13, { align: 'center', ls: 4, color: '#c9cdd4', alpha: a });
+    if (b.sub) { let ss = big ? 16 : 13; ctx.save(); spacing(4); for (; ss > 9; ss -= 0.5) { ctx.font = `400 ${ss}px Helvetica Neue, Helvetica, Arial, sans-serif`; if (ctx.measureText(b.sub).width < W - 20) break; } ctx.restore();
+      text(b.sub, W / 2, y + size * 0.55 + 18, ss, { align: 'center', ls: 4, color: '#c9cdd4', alpha: a }); }
   });
   S.banners = S.banners.filter(b => b.life > 0);
 }
@@ -1084,7 +1277,7 @@ function tick(rdt) {
   updateParticles(dt);
   ctx.save();
   if (S.shake > 0) { S.shake -= rdt; const m = 14 * S.shake; ctx.translate((Math.random() - 0.5) * m, (Math.random() - 0.5) * m); }
-  if (S.scene === 'ascent') { ascentUpdate(dt); ascentDraw(); }
+  if (S.scene === 'ascent') { if (!S.paused) ascentUpdate(dt); ascentDraw(); }
   else if (S.scene === 'boostback') boostbackDraw(dt);
   else if (S.scene === 'landing') { landingUpdate(dt); landingDraw(); }
   else if (S.scene === 'reentry') reentryDraw(dt);
@@ -1097,13 +1290,14 @@ function tick(rdt) {
   if (S.screen === 'build') { if (S.kitFlash && S.kitFlash.t > 0) S.kitFlash.t -= rdt; drawKit(); }
   const flying = S.screen === 'none' && (S.scene === 'ascent' || S.scene === 'landing');
   document.body.dataset.flight = flying ? S.scene : '';
+  touchSync();
   engineSound();
 }
 let last = performance.now();
 function frame(now) { const dt = (now - last) / 1000; last = now; try { tick(dt); } catch (err) { console.error(err); } requestAnimationFrame(frame); }
 
 // test / capture hooks
-window.__game = { S, show, startLaunch, startLanding, startReentry, stage, finish, tick, P, buildFlaws, shareText };
+window.__game = { S, show, startLaunch, startLanding, startReentry, stage, finish, tick, P, buildFlaws, shareText, MISSIONS, newWeather, stageState, burnAlt, landingPredict };
 window.__advance = (ms, step = 1000 / 60) => { for (let t = 0; t < ms; t += step) tick(step / 1000); };
 if (CAPTURE) SND.startLog(() => S.t);
 
