@@ -16,7 +16,7 @@ if (CAPTURE) document.body.classList.add('capture');
 const SND = window.GameAudio || { play() {}, engine() {}, setMuted() {}, muted: false, startLog() {} };
 const FEATURE_WAVEOFF = false;   // "catch called off, ditch in the Gulf" is parked for now (Tobias: hold off)
 const GAME_URL = 'https://catch-the-booster-390255.onrender.com';  // public link, used by the share button
-const LEADERBOARD_URL = null;    // hook for a future global leaderboard API (POST {name, score, ...}, GET top 20)
+const LEADERBOARD_URL = 'https://chopsticks-leaderboard.onrender.com';
 const TOUCH = qs.get('touch') === '1' || (window.matchMedia && matchMedia('(pointer: coarse)').matches);
 if (TOUCH) document.body.classList.add('touch');
 
@@ -163,7 +163,8 @@ function show(id) {
   if (id === 'build') renderBuild();
   if (id === 'crew') renderCrew();
   if (id === 'weather') { if (!S.wx) newWeather(); renderWeather(); }
-  if (id === 'scores') renderBoard('#scores-board', { heading: false });
+  if (id === 'title') wakeBoard();
+  if (id === 'scores') { renderBoard('#scores-board', { heading: false }); refreshWorld(false); }
   if (['title', 'how', 'mission', 'build', 'crew', 'weather', 'scores'].includes(id)) { S.scene = 'pad'; }
   hideTip();
   if (TIPS[id]) menuTip(id, TIPS[id][Math.floor(rng() * TIPS[id].length)]);
@@ -1281,8 +1282,11 @@ function finish(r) {
   btn('SHARE ON X', 'share', () => shareX());
   btn('TITLE', '', () => show('title'));
   saveScore(S.result);
+  boardTab = 'world';
+  if (worldState.status !== 'ok') worldState.status = 'loading';
   renderBoard('#board');
   show('result');
+  refreshWorld(true);
 }
 function scrollToFlaw() { setTimeout(() => { const el = document.querySelector('.opt-group.flaw'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' }); }, 30); }
 function shareText() {
@@ -1298,8 +1302,12 @@ function shareX() {
   S.shareUrl = url;
   if (!CAPTURE) window.open(url, '_blank', 'noopener');
 }
-// Scores live in localStorage on this device. A global board can plug in later via LEADERBOARD_URL.
-const BOARD_KEY = 'ctb-board', BOARD_MAX = 20;
+// Local scores stay in localStorage. Worldwide scores go to LEADERBOARD_URL (current UTC month).
+const BOARD_KEY = 'ctb-board', BOARD_MAX = 20, NAME_KEY = 'ctb-name', POSTED_KEY = 'ctb-posted';
+let boardTab = 'world';
+let worldState = { status: 'idle', scores: [], season: '', error: false };
+let wakePromise = null;
+let editingName = false;
 function localDay() {
   const n = new Date();
   return n.getFullYear() + '-' + String(n.getMonth() + 1).padStart(2, '0') + '-' + String(n.getDate()).padStart(2, '0');
@@ -1308,6 +1316,15 @@ function boardDate(iso) {
   const p = String(iso || '').split('-').map(Number);
   if (p.length < 3 || !p[0]) return iso || '';
   return new Date(p[0], p[1] - 1, p[2]).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function loadName() { try { return (localStorage.getItem(NAME_KEY) || '').trim(); } catch (e) { return ''; } }
+function saveName(n) { try { localStorage.setItem(NAME_KEY, n); } catch (e) {} }
+function postedIds() { try { return JSON.parse(localStorage.getItem(POSTED_KEY) || '[]'); } catch (e) { return []; } }
+function markPosted(id) {
+  if (!id) return;
+  const a = postedIds();
+  if (!a.includes(id)) { a.push(id); try { localStorage.setItem(POSTED_KEY, JSON.stringify(a.slice(-80))); } catch (e) {} }
 }
 function loadBoard() { try { return JSON.parse(localStorage.getItem(BOARD_KEY) || '[]'); } catch (e) { return []; } }
 function saveScore(r) {
@@ -1319,21 +1336,126 @@ function saveScore(r) {
   try { localStorage.setItem(BOARD_KEY, JSON.stringify(kept)); S.boardError = false; }
   catch (e) { S.boardError = true; }
   S.lastEntry = entry.id;
-  if (LEADERBOARD_URL) fetch(LEADERBOARD_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(entry) }).catch(() => {});
+}
+function wakeBoard() {
+  if (!LEADERBOARD_URL) return Promise.resolve(false);
+  if (wakePromise) return wakePromise;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 60000);
+  wakePromise = fetch(LEADERBOARD_URL + '/health', { signal: ctrl.signal })
+    .then(r => r.ok)
+    .catch(() => false)
+    .then(ok => { if (!ok) wakePromise = null; return ok; })
+    .finally(() => clearTimeout(t));
+  return wakePromise;
+}
+function fetchWorld() {
+  if (!LEADERBOARD_URL) { worldState = { status: 'error', scores: [], season: '', error: true }; return Promise.resolve(); }
+  worldState = Object.assign({}, worldState, { status: 'loading' });
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 45000);
+  return wakeBoard().then(() => fetch(LEADERBOARD_URL + '/scores', { signal: ctrl.signal }))
+    .then(r => { if (!r.ok) throw new Error('bad'); return r.json(); })
+    .then(data => { worldState = { status: 'ok', scores: data.scores || [], season: data.season || '', error: false }; })
+    .catch(() => { worldState = { status: 'error', scores: worldState.scores || [], season: worldState.season || '', error: true }; })
+    .finally(() => clearTimeout(t));
+}
+function postScore(entry, name) {
+  if (!LEADERBOARD_URL || !entry || !name) return Promise.resolve(false);
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 45000);
+  return wakeBoard().then(() => fetch(LEADERBOARD_URL + '/scores', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, score: entry.score, acc: entry.acc, outcome: entry.outcome, mission: entry.mission }),
+    signal: ctrl.signal
+  })).then(async r => {
+    if (r.ok) {
+      const data = await r.json().catch(() => ({}));
+      markPosted(entry.id);
+      if (data.id) S.lastWorldId = data.id;
+      S.boardPostError = null;
+      return true;
+    }
+    const data = await r.json().catch(() => ({}));
+    S.boardPostError = data.error || 'Could not post that score.';
+    return false;
+  }).catch(() => { S.boardPostError = null; return false; })
+    .finally(() => clearTimeout(t));
+}
+function refreshWorld(postLatest) {
+  const name = loadName();
+  const latest = loadBoard().find(e => e.id === S.lastEntry);
+  const chain = (postLatest && name && latest && !postedIds().includes(latest.id))
+    ? postScore(latest, name) : Promise.resolve(false);
+  return chain.then(() => fetchWorld()).then(() => renderOpenBoards());
+}
+function renderOpenBoards() {
+  const result = document.getElementById('s-result');
+  const scores = document.getElementById('s-scores');
+  if (result && result.classList.contains('active')) renderBoard('#board');
+  if (scores && scores.classList.contains('active')) renderBoard('#scores-board', { heading: false });
+}
+function rowHTML(e, mine) {
+  const who = e.name ? '<b>' + esc(e.name) + '</b> · ' : '';
+  return '<li class="' + (mine ? 'me' : '') + '"><span class="sc">' + fmt(e.score) + '</span><span class="out">' + who + esc(e.outcome) + (e.acc != null ? ' · ' + e.acc + '%' : '') + '</span><span class="meta">' + esc(e.mission) + ' · ' + esc(boardDate(e.date)) + '</span></li>';
+}
+function isMineWorld(e) {
+  if (S.lastWorldId && e.id === S.lastWorldId) return true;
+  const last = loadBoard().find(x => x.id === S.lastEntry);
+  const n = loadName();
+  return !!(last && n && e.name && e.name.toLowerCase() === n.toLowerCase() && e.score === last.score && e.outcome === last.outcome);
 }
 function boardHTML(opts) {
-  const b = loadBoard();
-  let body;
-  if (S.boardError) body = '<p class="muted">Scores couldn\'t be saved on this device. They may be blocked in private browsing.</p>';
-  else if (!b.length) body = '<p class="muted">No flights on this device yet. Finish a launch and your score will show up here.</p>';
-  else body = '<ol>' + b.map(e => `<li class="${e.id === S.lastEntry ? 'me' : ''}"><span class="sc">${fmt(e.score)}</span><span class="out">${e.outcome}${e.acc != null ? ' · ' + e.acc + '%' : ''}</span><span class="meta">${e.mission} · ${boardDate(e.date)}</span></li>`).join('') + '</ol>';
-  const head = (opts && opts.heading === false) ? '' : '<h3>SCORES ON THIS DEVICE</h3>';
-  return head + body + '<div class="muted board-note">These scores stay on this phone or browser. A worldwide leaderboard isn\'t up yet.</div>';
+  const name = loadName();
+  const local = loadBoard();
+  const tab = boardTab === 'device' ? 'device' : 'world';
+  const tabs = '<div class="board-tabs"><button type="button" data-board-tab="world" class="' + (tab === 'world' ? 'on' : '') + '">THIS MONTH</button><button type="button" data-board-tab="device" class="' + (tab === 'device' ? 'on' : '') + '">THIS DEVICE</button></div>';
+  let heading = '';
+  if (!(opts && opts.heading === false)) heading = tab === 'world' ? "<h3>THIS MONTH'S LEADERBOARD</h3>" : '<h3>SCORES ON THIS DEVICE</h3>';
+  let mid = '';
+  if (tab === 'world') {
+    if (!name || editingName) mid += '<form class="pilot-row"><input id="pilot-name" name="pilot" maxlength="16" placeholder="YOUR NAME" autocomplete="nickname" enterkeyhint="done" value="' + esc(name) + '"><button type="submit" class="btn primary">POST</button></form>';
+    else mid += '<div class="pilot-who">Posting as <b style="color:#fff">' + esc(name) + '</b> · <button type="button" data-edit-name>change</button></div>';
+    if (S.boardPostError) mid += '<p class="muted board-status">' + esc(S.boardPostError) + '</p>';
+    if (worldState.status === 'loading' || worldState.status === 'idle') mid += '<p class="muted board-status">Loading worldwide scores…</p>';
+    else if (worldState.status === 'error' && !(worldState.scores && worldState.scores.length)) mid += '<p class="muted board-status">Worldwide scores are waking up or unavailable. Your score is saved on this device.</p>';
+    if (worldState.scores && worldState.scores.length) mid += '<ol>' + worldState.scores.map(e => rowHTML(e, isMineWorld(e))).join('') + '</ol>';
+    else if (worldState.status === 'ok') mid += '<p class="muted board-status">No worldwide scores this month yet. Finish a flight and post yours.</p>';
+    mid += '<div class="muted board-note">' + esc(worldState.season || "This month's season") + '. The board resets each month. Scores on this device stay on this phone or browser.</div>';
+  } else {
+    if (S.boardError) mid += '<p class="muted">Scores couldn\'t be saved on this device. They may be blocked in private browsing.</p>';
+    else if (!local.length) mid += '<p class="muted">No flights on this device yet. Finish a launch and your score will show up here.</p>';
+    else mid += '<ol>' + local.map(e => rowHTML(e, e.id === S.lastEntry)).join('') + '</ol>';
+    mid += '<div class="muted board-note">These scores stay on this phone or browser.</div>';
+  }
+  return heading + tabs + mid;
 }
 function renderBoard(sel, opts) {
   const el = $(sel || '#board'); if (!el) return;
   el.innerHTML = boardHTML(opts);
   el.classList.remove('hidden-board');
+}
+if (!window.__boardBound) {
+  window.__boardBound = true;
+  document.addEventListener('click', e => {
+    const tab = e.target.closest('[data-board-tab]');
+    if (tab) { boardTab = tab.dataset.boardTab; renderOpenBoards(); return; }
+    if (e.target.closest('[data-edit-name]')) { editingName = true; renderOpenBoards(); }
+  });
+  document.addEventListener('submit', e => {
+    const form = e.target.closest('.pilot-row');
+    if (!form) return;
+    e.preventDefault();
+    const input = form.querySelector('input');
+    const raw = (input && input.value || '').replace(/\s+/g, ' ').trim().slice(0, 16);
+    if (!raw) { if (input) input.focus(); return; }
+    saveName(raw);
+    editingName = false;
+    S.boardPostError = null;
+    renderOpenBoards();
+    refreshWorld(true);
+  });
 }
 
 // ---------------------------------------------------------------- INPUT
@@ -1405,7 +1527,7 @@ let last = performance.now();
 function frame(now) { const dt = (now - last) / 1000; last = now; try { tick(dt); } catch (err) { console.error(err); } requestAnimationFrame(frame); }
 
 // test / capture hooks
-window.__game = { S, show, startLaunch, startLanding, startReentry, stage, finish, tick, P, buildFlaws, shareText, MISSIONS, newWeather, stageState, burnAlt, landingPredict, speedState, landPunch, minSink, loadBoard, saveScore, renderBoard };
+window.__game = { S, show, startLaunch, startLanding, startReentry, stage, finish, tick, P, buildFlaws, shareText, MISSIONS, newWeather, stageState, burnAlt, landingPredict, speedState, landPunch, minSink, loadBoard, saveScore, renderBoard, wakeBoard, refreshWorld, loadName, saveName };
 window.__advance = (ms, step = 1000 / 60) => { for (let t = 0; t < ms; t += step) tick(step / 1000); };
 if (CAPTURE) SND.startLog(() => S.t);
 
