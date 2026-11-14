@@ -10,7 +10,7 @@ canvas#game{position:fixed;inset:0;width:100vw;height:100vh;display:block}
 @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .title-wrap{text-align:center;max-width:900px}
 .kicker,.step{font-size:12px;letter-spacing:.35em;color:var(--mut);margin-bottom:14px}
-.logo-text{font-weight:300;font-size:clamp(46px,10vw,118px);letter-spacing:.22em;line-height:.98;margin:0 0 18px;text-indent:.22em}
+.logo-text{font-weight:300;font-size:clamp(46px,7vw,96px);letter-spacing:.2em;line-height:.98;margin:0 0 18px;text-indent:.2em;white-space:nowrap}
 .tag{letter-spacing:.12em;color:#cfd3da;font-size:15px;margin:0 0 30px;text-transform:uppercase}
 h2{font-weight:300;letter-spacing:.25em;font-size:24px;margin:0 0 20px}
 h3{font-weight:500;letter-spacing:.2em;font-size:12px;color:var(--mut);margin:18px 0 8px}
